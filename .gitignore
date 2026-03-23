@@ -143,3 +143,4 @@ poetry.toml
 /.windsurf/
 # emscripten
 a.out.*
+.review-squad/

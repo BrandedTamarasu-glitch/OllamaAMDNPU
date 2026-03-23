@@ -264,6 +264,7 @@ set(GGML_HEXAGON_FP32_QUANTIZE_GROUP_SIZE 128 CACHE STRING "ggml: quantize group
 set   (GGML_VULKAN_SHADERS_GEN_TOOLCHAIN "" CACHE FILEPATH "ggml: toolchain file for vulkan-shaders-gen")
 
 option(GGML_ZENDNN                          "ggml: use ZenDNN"                                OFF)
+option(GGML_XDNA                            "ggml: use AMD XDNA NPU (RyzenAI)"               OFF)
 option(ZENDNN_ROOT                          "ggml: path to ZenDNN installation"               "")
 
 # extra artifacts
@@ -318,6 +319,7 @@ set(GGML_PUBLIC_HEADERS
     include/ggml-alloc.h
     include/ggml-backend.h
     include/ggml-blas.h
+    include/ggml-xdna.h
     include/ggml-cann.h
     include/ggml-cpp.h
     include/ggml-cuda.h
