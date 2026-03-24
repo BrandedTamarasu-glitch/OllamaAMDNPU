@@ -160,6 +160,17 @@ ggml_xdna: slot 2 ready — tile 2048×5632×64
 
 ---
 
+## Roadmap
+
+| Phase | Status | Description |
+|-------|--------|-------------|
+| 1 | ✅ Done | NPU baseline — XDNA2 backend, weight cache, K=2048 (TinyLlama 1.1B) |
+| 2 | ✅ Done | Dual-slot dispatch — second xclbin slot for K=5632 (FFN down layers) |
+| 3 | Planned | 7B model support — xclbins for K=4096 and K=14336 (Llama 3.1 7B / Mistral 7B) |
+| 4 | Planned | Hybrid NPU prefill / iGPU decode — NPU handles large-N prefill, RDNA3.5 iGPU handles N=1 decode via Vulkan |
+
+---
+
 ## Upstream
 
 This repo tracks [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp). The XDNA backend lives entirely in `ggml/src/ggml-xdna/`.
