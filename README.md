@@ -166,9 +166,9 @@ ggml_xdna: slot 2 ready — tile 2048×5632×64
 |-------|--------|-------------|
 | 1 | ✅ Done | NPU baseline — XDNA2 backend, weight cache, K=2048 (TinyLlama 1.1B) |
 | 2 | ✅ Done | Dual-slot dispatch — second xclbin slot for K=5632 (FFN down layers) |
-| 3 | Planned | 7B model support — xclbins for K=4096 and K=14336 (Llama 3.1 7B / Mistral 7B) |
-| 4 | Planned | Hybrid NPU prefill / iGPU decode — NPU handles large-N prefill, RDNA3.5 iGPU handles N=1 decode via Vulkan |
-| 5 | Planned | Long context (8k–32k) — validate KV cache memory, RoPE scaling, benchmark NPU prefill scaling across context lengths |
+| 3 | ✅ Done | 8B model support — K=4096 and K=14336 slots, tile-loop optimisation (+15–28% prefill over CPU) |
+| 4 | Planned | Workload-isolation mode — NPU as non-competing backend (doesn't contend with iGPU); power measurement vs Vulkan; GGML_XDNA_MAX_N for explicit NPU-only or Vulkan-only routing |
+| 5 | Planned | Long context (8k–32k) — validate KV cache memory, RoPE scaling, benchmark NPU prefill at full tile utilisation (N≈2048) |
 
 ---
 

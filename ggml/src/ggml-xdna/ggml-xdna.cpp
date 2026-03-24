@@ -34,9 +34,12 @@
  *   GGML_XDNA_TILE_N        — tile cols    (default 32, range 1–131072)
  *   GGML_XDNA_MIN_BATCH     — minimum M×N×K to offload (default 32768)
  *   GGML_XDNA_MIN_N         — minimum N (activation batch) to offload (default 2)
- *                             Default of 2 skips decode (N=1) where NPU DMA
- *                             overhead exceeds CPU compute. Set to 1 to force
- *                             NPU for all ops (not recommended for autoregressive).
+ *                             Set to 1 to include decode (N=1). Combine with
+ *                             GGML_XDNA_MAX_N=1 for NPU-decode-only mode where
+ *                             a faster backend (e.g. Vulkan) handles prefill.
+ *   GGML_XDNA_MAX_N         — maximum N to offload (default 131072, i.e. no cap)
+ *                             Set to 1 with MIN_N=1 to restrict NPU to decode only,
+ *                             letting Vulkan handle large-batch prefill ops.
  *
  * Optional extra xclbin slots (e.g. different K dimensions for FFN layers):
  *   GGML_XDNA_XCLBIN_PATH_2..4 — path to xclbin        (all three required per slot)
@@ -107,8 +110,10 @@ struct ggml_backend_xdna_context {
     // Minimum M*N*K to bother sending to the NPU.
     int64_t min_batch = 32768;
 
-    // Minimum N (activation batch) to offload to NPU.
+    // Activation batch range to offload to NPU [min_n, max_n].
+    // Set min_n=1, max_n=1 for NPU-decode-only mode (Vulkan handles prefill).
     int64_t min_n = 1;
+    int64_t max_n = 131072;
 
     // Per-tile NPU kernel timeout in milliseconds.
     int64_t timeout_ms = 5000;
@@ -156,6 +161,7 @@ struct ggml_backend_xdna_context {
         slots[0].tile_n = env_int("GGML_XDNA_TILE_N", 32, 131072);
         min_batch       = env_int("GGML_XDNA_MIN_BATCH", 32768, INT64_MAX);
         min_n           = env_int("GGML_XDNA_MIN_N",     2,     131072);
+        max_n           = env_int("GGML_XDNA_MAX_N",     131072, 131072);
         timeout_ms      = env_int("GGML_XDNA_TIMEOUT_MS", 5000, INT64_MAX);
     }
 
@@ -532,6 +538,7 @@ static bool ggml_backend_xdna_device_supports_op(ggml_backend_dev_t       dev,
             if (ctx->find_slot(K) < 0) { return false; }
             if ((double)M * N * K < (double)ctx->min_batch) { return false; }
             if (N < ctx->min_n) { return false; }
+            if (N > ctx->max_n) { return false; }
 
             return true;
         }
