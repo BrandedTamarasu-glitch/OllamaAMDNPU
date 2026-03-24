@@ -33,6 +33,10 @@
  *   GGML_XDNA_TILE_K        — tile inner   (default 32, range 1–131072)
  *   GGML_XDNA_TILE_N        — tile cols    (default 32, range 1–131072)
  *   GGML_XDNA_MIN_BATCH     — minimum M×N×K to offload (default 32768)
+ *   GGML_XDNA_MIN_N         — minimum N (activation batch) to offload (default 2)
+ *                             Default of 2 skips decode (N=1) where NPU DMA
+ *                             overhead exceeds CPU compute. Set to 1 to force
+ *                             NPU for all ops (not recommended for autoregressive).
  *
  * Optional second xclbin slot (e.g. for FFN down layers with a different K):
  *   GGML_XDNA_XCLBIN_PATH_2 — path to second xclbin   (all three required)
@@ -63,7 +67,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -103,6 +106,10 @@ struct ggml_backend_xdna_context {
 
     // Minimum M*N*K to bother sending to the NPU.
     int64_t min_batch = 32768;
+
+    // Minimum N (activation batch) to offload to NPU.
+    // Set to tile_n to avoid wasting DMA bandwidth on decode (N=1) ops.
+    int64_t min_n = 1;
 
     // Per-tile NPU kernel timeout in milliseconds.
     // Minimum 1 (env_int rejects 0). Use INT64_MAX for effectively no timeout.
@@ -164,6 +171,7 @@ struct ggml_backend_xdna_context {
         tile_k     = env_int("GGML_XDNA_TILE_K",    32,    131072);
         tile_n     = env_int("GGML_XDNA_TILE_N",    32,    131072);
         min_batch  = env_int("GGML_XDNA_MIN_BATCH", 32768, INT64_MAX);
+        min_n      = env_int("GGML_XDNA_MIN_N",     2,     131072);
         timeout_ms = env_int("GGML_XDNA_TIMEOUT_MS", 5000, INT64_MAX);
     }
 };
@@ -527,6 +535,7 @@ static bool ggml_backend_xdna_device_supports_op(ggml_backend_dev_t       dev,
                 if (!ctx->kernel2_ready || K != ctx->tile_k2) { return false; }
             }
             if ((double)M * N * K < (double)ctx->min_batch) { return false; }
+            if (N < ctx->min_n) { return false; }
 
             return true;
         }
