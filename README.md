@@ -168,6 +168,7 @@ ggml_xdna: slot 2 ready — tile 2048×5632×64
 | 2 | ✅ Done | Dual-slot dispatch — second xclbin slot for K=5632 (FFN down layers) |
 | 3 | Planned | 7B model support — xclbins for K=4096 and K=14336 (Llama 3.1 7B / Mistral 7B) |
 | 4 | Planned | Hybrid NPU prefill / iGPU decode — NPU handles large-N prefill, RDNA3.5 iGPU handles N=1 decode via Vulkan |
+| 5 | Planned | Long context (8k–32k) — validate KV cache memory, RoPE scaling, benchmark NPU prefill scaling across context lengths |
 
 ---
 
