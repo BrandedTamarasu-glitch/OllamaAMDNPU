@@ -38,12 +38,12 @@
  *                             overhead exceeds CPU compute. Set to 1 to force
  *                             NPU for all ops (not recommended for autoregressive).
  *
- * Optional second xclbin slot (e.g. for FFN down layers with a different K):
- *   GGML_XDNA_XCLBIN_PATH_2 — path to second xclbin   (all three required)
- *   GGML_XDNA_INSTR_PATH_2  — path to second _sequence.bin
- *   GGML_XDNA_TILE_K2       — K dimension for second slot (required)
- *   GGML_XDNA_TILE_M2       — tile rows for second slot   (default 32)
- *   GGML_XDNA_TILE_N2       — tile cols for second slot   (default 32)
+ * Optional extra xclbin slots (e.g. different K dimensions for FFN layers):
+ *   GGML_XDNA_XCLBIN_PATH_2..4 — path to xclbin        (all three required per slot)
+ *   GGML_XDNA_INSTR_PATH_2..4  — path to _sequence.bin
+ *   GGML_XDNA_TILE_K2..4       — K dimension (required)
+ *   GGML_XDNA_TILE_M2..4       — tile rows   (default 32)
+ *   GGML_XDNA_TILE_N2..4       — tile cols   (default 32)
  *
  * Build the xclbin with:
  *   cd mlir-aie/programming_examples/basic/matrix_multiplication/single_core
@@ -82,38 +82,35 @@
 // ---------------------------------------------------------------------------
 
 struct ggml_backend_xdna_context {
-    xrt::device                      device;
-    std::unique_ptr<xrt::hw_context> hw_ctx;
-    std::unique_ptr<xrt::kernel>     matmul_kernel;
+    xrt::device device;
 
-    // Instruction buffer (loaded from _sequence.bin).
-    // Synced to device once in try_init_context; never re-synced because the
-    // buffer is read-only after init.
-    std::vector<uint32_t> instr_data;
-    xrt::bo               bo_instr;
+    // Per-xclbin slot — up to MAX_SLOTS with different K dimensions.
+    // Slot 0 is the primary (GGML_XDNA_XCLBIN_PATH / GGML_XDNA_TILE_K).
+    // Slots 1–3 are optional extras (_2 / _3 / _4 env suffix).
+    static constexpr int MAX_SLOTS = 4;
+    struct XclbinSlot {
+        std::unique_ptr<xrt::hw_context> hw_ctx;
+        std::unique_ptr<xrt::kernel>     kernel;
+        std::vector<uint32_t>            instr_data;
+        xrt::bo                          bo_instr;
+        xrt::bo                          bo_a, bo_b, bo_c, bo_tmp, bo_trace;
+        int64_t tile_m = 32;
+        int64_t tile_k = 0;   // 0 = slot disabled
+        int64_t tile_n = 32;
+        bool    ready  = false;
+    };
+    XclbinSlot slots[MAX_SLOTS];
 
-    // Pre-allocated data buffers (created once in try_init_context).
-    xrt::bo bo_a;
-    xrt::bo bo_b;
-    xrt::bo bo_c;
-    xrt::bo bo_tmp;
-    xrt::bo bo_trace;
-
-    // Tile dimensions baked into the compiled xclbin.
-    int64_t tile_m = 32;
-    int64_t tile_k = 32;
-    int64_t tile_n = 32;
+    // True when slot 0 is ready (primary xclbin loaded).
+    bool kernel_ready = false;
 
     // Minimum M*N*K to bother sending to the NPU.
     int64_t min_batch = 32768;
 
     // Minimum N (activation batch) to offload to NPU.
-    // Set to tile_n to avoid wasting DMA bandwidth on decode (N=1) ops.
     int64_t min_n = 1;
 
     // Per-tile NPU kernel timeout in milliseconds.
-    // Minimum 1 (env_int rejects 0). Use INT64_MAX for effectively no timeout.
-    // Default 5000 ms recommended for server deployments.
     int64_t timeout_ms = 5000;
 
     // Weight cache: quantise each weight tensor once; reuse on subsequent tokens.
@@ -140,20 +137,6 @@ struct ggml_backend_xdna_context {
     // issues concurrent graph_compute calls on multiple handles.
     std::mutex dispatch_mutex;
 
-    // True when xclbin + instructions loaded successfully.
-    bool kernel_ready = false;
-
-    // --- Second xclbin slot (optional, e.g. K=5632 for FFN down layers) ---
-    std::unique_ptr<xrt::hw_context> hw_ctx2;
-    std::unique_ptr<xrt::kernel>     matmul_kernel2;
-    std::vector<uint32_t>            instr_data2;
-    xrt::bo                          bo_instr2;
-    xrt::bo bo_a2, bo_b2, bo_c2, bo_tmp2, bo_trace2;
-    int64_t tile_m2 = 32;
-    int64_t tile_k2 = 0;   // 0 = slot disabled
-    int64_t tile_n2 = 32;
-    bool    kernel2_ready = false;
-
     explicit ggml_backend_xdna_context() {
         auto env_int = [](const char * name, int64_t def, int64_t max_val) -> int64_t {
             const char * v = std::getenv(name);
@@ -167,12 +150,21 @@ struct ggml_backend_xdna_context {
             }
             return val;
         };
-        tile_m     = env_int("GGML_XDNA_TILE_M",    32,    131072);
-        tile_k     = env_int("GGML_XDNA_TILE_K",    32,    131072);
-        tile_n     = env_int("GGML_XDNA_TILE_N",    32,    131072);
-        min_batch  = env_int("GGML_XDNA_MIN_BATCH", 32768, INT64_MAX);
-        min_n      = env_int("GGML_XDNA_MIN_N",     2,     131072);
-        timeout_ms = env_int("GGML_XDNA_TIMEOUT_MS", 5000, INT64_MAX);
+        // Slot 0 tile dims read here; extras are read during try_init_context.
+        slots[0].tile_m = env_int("GGML_XDNA_TILE_M", 32, 131072);
+        slots[0].tile_k = env_int("GGML_XDNA_TILE_K", 32, 131072);
+        slots[0].tile_n = env_int("GGML_XDNA_TILE_N", 32, 131072);
+        min_batch       = env_int("GGML_XDNA_MIN_BATCH", 32768, INT64_MAX);
+        min_n           = env_int("GGML_XDNA_MIN_N",     2,     131072);
+        timeout_ms      = env_int("GGML_XDNA_TIMEOUT_MS", 5000, INT64_MAX);
+    }
+
+    // Returns the index of the first slot whose tile_k matches K, or -1.
+    int find_slot(int64_t K) const {
+        for (int i = 0; i < MAX_SLOTS; i++) {
+            if (slots[i].ready && slots[i].tile_k == K) { return i; }
+        }
+        return -1;
     }
 };
 
@@ -209,28 +201,27 @@ static std::vector<uint32_t> load_instr_file(const std::string & path) {
 // a_tile: int8 [tile_m × tile_k] (row-major)
 // b_tile: int8 [tile_k × tile_n] (row-major, transposed inside kernel)
 // c_tile: int32 [tile_m × tile_n] output
-// K selects which xclbin slot to use (slot 2 when K == ctx->tile_k2).
+// slot_idx: which xclbin slot to use (from ctx->find_slot(K)).
 // Returns true on success, false on NPU timeout or hardware fault.
 // Callers must propagate failure up to graph_compute as GGML_STATUS_FAILED.
 static bool dispatch_tile(ggml_backend_xdna_context * ctx,
                           const int8_t * a_tile,
                           const int8_t * b_tile,
                           int32_t      * c_tile,
-                          int64_t        K) {
-    const bool use2 = (ctx->kernel2_ready && K == ctx->tile_k2);
+                          int           slot_idx) {
+    auto & s          = ctx->slots[slot_idx];
+    auto & kern       = *s.kernel;
+    auto & instr      = s.bo_instr;
+    auto & bo_a       = s.bo_a;
+    auto & bo_b       = s.bo_b;
+    auto & bo_c       = s.bo_c;
+    auto & bo_tmp     = s.bo_tmp;
+    auto & bo_trace   = s.bo_trace;
+    auto & instr_data = s.instr_data;
 
-    auto & kern       = use2 ? *ctx->matmul_kernel2 : *ctx->matmul_kernel;
-    auto & instr      = use2 ? ctx->bo_instr2        : ctx->bo_instr;
-    auto & bo_a       = use2 ? ctx->bo_a2            : ctx->bo_a;
-    auto & bo_b       = use2 ? ctx->bo_b2            : ctx->bo_b;
-    auto & bo_c       = use2 ? ctx->bo_c2            : ctx->bo_c;
-    auto & bo_tmp     = use2 ? ctx->bo_tmp2          : ctx->bo_tmp;
-    auto & bo_trace   = use2 ? ctx->bo_trace2        : ctx->bo_trace;
-    auto & instr_data = use2 ? ctx->instr_data2      : ctx->instr_data;
-
-    const int64_t tm = use2 ? ctx->tile_m2 : ctx->tile_m;
-    const int64_t tk = use2 ? ctx->tile_k2 : ctx->tile_k;
-    const int64_t tn = use2 ? ctx->tile_n2 : ctx->tile_n;
+    const int64_t tm = s.tile_m;
+    const int64_t tk = s.tile_k;
+    const int64_t tn = s.tile_n;
 
     std::memcpy(bo_a.map<int8_t *>(), a_tile, (size_t)tm * tk * sizeof(int8_t));
     std::memcpy(bo_b.map<int8_t *>(), b_tile, (size_t)tk * tn * sizeof(int8_t));
@@ -279,10 +270,12 @@ static bool ggml_backend_xdna_mul_mat(ggml_backend_xdna_context * ctx,
     const int64_t K = ne10; // inner dimension
     const int64_t N = ne11; // activation batch
 
-    const bool    use2 = (ctx->kernel2_ready && K == ctx->tile_k2);
-    const int64_t tm   = use2 ? ctx->tile_m2 : ctx->tile_m;
-    const int64_t tk   = use2 ? ctx->tile_k2 : ctx->tile_k;
-    const int64_t tn   = use2 ? ctx->tile_n2 : ctx->tile_n;
+    const int slot_idx = ctx->find_slot(K);
+    GGML_ASSERT(slot_idx >= 0 && "mul_mat called for K with no matching slot");
+    const auto & sl = ctx->slots[slot_idx];
+    const int64_t tm = sl.tile_m;
+    const int64_t tk = sl.tile_k;
+    const int64_t tn = sl.tile_n;
 
     // --- Weight cache: quantise src0 once per unique tensor, reuse on every token ---
     auto wit = ctx->weight_cache.find(src0->data);
@@ -343,28 +336,33 @@ static bool ggml_backend_xdna_mul_mat(ggml_backend_xdna_context * ctx,
 
     float * out = (float *) dst->data;
 
-    // Tile over M and N only — no K loop; one dispatch per (m0, n0) output tile.
-    for (int64_t m0 = 0; m0 < M; m0 += tm) {
-        for (int64_t n0 = 0; n0 < N; n0 += tn) {
-            // Fill tile_a from cached qa[m0:m0+tm, 0:K] — zero-pad edge rows.
-            std::fill(ctx->tile_a.begin(), ctx->tile_a.end(), 0);
+    // Tile over N (outer) then M (inner).
+    // tile_b depends only on n0, so it is computed once per n0 iteration rather
+    // than once per (m0, n0) pair — avoids redundant K×tn transpose work when
+    // M > tile_m (e.g. gate/up_proj with M=14336 has 7 m0 tiles but 1 n0 tile).
+    for (int64_t n0 = 0; n0 < N; n0 += tn) {
+        // Fill tile_b from quant_b[n0:n0+tn, 0:K] transposed to [K, tn].
+        // quant_b is [N, K]; kernel expects B in [K, N] layout.
+        // Skip zero-fill for full tiles — all tn columns will be written below.
+        if ((n0 + tn) > N) { std::fill(ctx->tile_b.begin(), ctx->tile_b.end(), 0); }
+        for (int64_t ni = 0; ni < tn && (n0 + ni) < N; ni++) {
+            for (int64_t ki = 0; ki < tk; ki++) {
+                ctx->tile_b[ki * tn + ni] =
+                    ctx->quant_b[(n0 + ni) * K + ki];
+            }
+        }
+
+        for (int64_t m0 = 0; m0 < M; m0 += tm) {
+            // Fill tile_a from cached qa[m0:m0+tm, 0:K].
+            // Skip zero-fill for full tiles — all tm rows will be written below.
+            if ((m0 + tm) > M) { std::fill(ctx->tile_a.begin(), ctx->tile_a.end(), 0); }
             for (int64_t mi = 0; mi < tm && (m0 + mi) < M; mi++) {
                 std::memcpy(ctx->tile_a.data() + mi * tk,
                             qa + (m0 + mi) * K,
                             K); // K == tk (supports_op guarantee)
             }
 
-            // Fill tile_b from quant_b[n0:n0+tn, 0:K] transposed to [K, tn].
-            // quant_b is [N, K]; kernel expects B in [K, N] layout.
-            std::fill(ctx->tile_b.begin(), ctx->tile_b.end(), 0);
-            for (int64_t ni = 0; ni < tn && (n0 + ni) < N; ni++) {
-                for (int64_t ki = 0; ki < tk; ki++) {
-                    ctx->tile_b[ki * tn + ni] =
-                        ctx->quant_b[(n0 + ni) * K + ki];
-                }
-            }
-
-            if (!dispatch_tile(ctx, ctx->tile_a.data(), ctx->tile_b.data(), ctx->tile_c.data(), K)) {
+            if (!dispatch_tile(ctx, ctx->tile_a.data(), ctx->tile_b.data(), ctx->tile_c.data(), slot_idx)) {
                 return false;
             }
 
@@ -528,12 +526,10 @@ static bool ggml_backend_xdna_device_supports_op(ggml_backend_dev_t       dev,
             const int64_t M = src0->ne[1];
             const int64_t K = src1->ne[0];
             const int64_t N = src1->ne[1];
-            // The xclbin is compiled for a fixed K dimension (ctx->tile_k).
+            // The xclbin is compiled for a fixed K dimension.
             // K-accumulation is handled internally by the AIE; we only dispatch
             // matrices whose K exactly matches one of the loaded xclbins.
-            if (K != ctx->tile_k) {
-                if (!ctx->kernel2_ready || K != ctx->tile_k2) { return false; }
-            }
+            if (ctx->find_slot(K) < 0) { return false; }
             if ((double)M * N * K < (double)ctx->min_batch) { return false; }
             if (N < ctx->min_n) { return false; }
 
@@ -592,113 +588,103 @@ static bool try_init_context(ggml_backend_xdna_context * ctx) {
         }
         return std::string(resolved);
     };
-    const std::string xclbin_str = resolve_path(xclbin_path, "GGML_XDNA_XCLBIN_PATH");
-    const std::string instr_str  = resolve_path(instr_path,  "GGML_XDNA_INSTR_PATH");
+
+    // Helper: load one slot from xclbin + instr files.
+    auto init_slot = [&](ggml_backend_xdna_context::XclbinSlot & sl,
+                         const std::string & xclbin_str,
+                         const std::string & instr_str,
+                         int slot_num) {
+        xrt::xclbin bin(xclbin_str);
+        ctx->device.register_xclbin(bin);
+        sl.hw_ctx  = std::make_unique<xrt::hw_context>(ctx->device, bin.get_uuid());
+        sl.kernel  = std::make_unique<xrt::kernel>(*sl.hw_ctx, "MLIR_AIE");
+
+        sl.instr_data = load_instr_file(instr_str);
+        sl.bo_instr   = xrt::bo(ctx->device,
+                                 sl.instr_data.size() * sizeof(uint32_t),
+                                 xrt::bo::flags::cacheable,
+                                 sl.kernel->group_id(1));
+        std::memcpy(sl.bo_instr.map<uint32_t *>(),
+                    sl.instr_data.data(),
+                    sl.instr_data.size() * sizeof(uint32_t));
+        sl.bo_instr.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+        auto & kern = *sl.kernel;
+        sl.bo_a   = xrt::bo(ctx->device, (size_t)sl.tile_m * sl.tile_k * sizeof(int8_t),
+                             xrt::bo::flags::host_only, kern.group_id(3));
+        sl.bo_b   = xrt::bo(ctx->device, (size_t)sl.tile_k * sl.tile_n * sizeof(int8_t),
+                             xrt::bo::flags::host_only, kern.group_id(4));
+        sl.bo_c   = xrt::bo(ctx->device, (size_t)sl.tile_m * sl.tile_n * sizeof(int32_t),
+                             xrt::bo::flags::host_only, kern.group_id(5));
+        sl.bo_tmp   = xrt::bo(ctx->device, 4, xrt::bo::flags::host_only, kern.group_id(6));
+        sl.bo_trace = xrt::bo(ctx->device, 4, xrt::bo::flags::host_only, kern.group_id(7));
+
+        // Pre-register output/scratch BOs with the DMA engine.
+        sl.bo_c.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        sl.bo_tmp.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+        sl.bo_trace.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+        sl.ready = true;
+        GGML_LOG_INFO("ggml_xdna: slot %d ready — tile %lld×%lld×%lld\n",
+                      slot_num,
+                      (long long)sl.tile_m, (long long)sl.tile_k, (long long)sl.tile_n);
+    };
 
     ctx->device = xrt::device(0);
 
-    xrt::xclbin bin(xclbin_str);
-    ctx->device.register_xclbin(bin);
-
-    ctx->hw_ctx = std::make_unique<xrt::hw_context>(ctx->device, bin.get_uuid());
-    ctx->matmul_kernel = std::make_unique<xrt::kernel>(*ctx->hw_ctx, "MLIR_AIE");
-
-    ctx->instr_data = load_instr_file(instr_str);
-    ctx->bo_instr   = xrt::bo(ctx->device,
-                               ctx->instr_data.size() * sizeof(uint32_t),
-                               xrt::bo::flags::cacheable,
-                               ctx->matmul_kernel->group_id(1));
-    std::memcpy(ctx->bo_instr.map<uint32_t *>(),
-                ctx->instr_data.data(),
-                ctx->instr_data.size() * sizeof(uint32_t));
-    ctx->bo_instr.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-
-    // Pre-allocate data BOs sized for one tile each.
-    auto & kern     = *ctx->matmul_kernel;
-    ctx->bo_a       = xrt::bo(ctx->device,
-                               (size_t)ctx->tile_m * ctx->tile_k * sizeof(int8_t),
-                               xrt::bo::flags::host_only, kern.group_id(3));
-    ctx->bo_b       = xrt::bo(ctx->device,
-                               (size_t)ctx->tile_k * ctx->tile_n * sizeof(int8_t),
-                               xrt::bo::flags::host_only, kern.group_id(4));
-    ctx->bo_c       = xrt::bo(ctx->device,
-                               (size_t)ctx->tile_m * ctx->tile_n * sizeof(int32_t),
-                               xrt::bo::flags::host_only, kern.group_id(5));
-    ctx->bo_tmp     = xrt::bo(ctx->device, 4,
-                               xrt::bo::flags::host_only, kern.group_id(6));
-    ctx->bo_trace   = xrt::bo(ctx->device, 4,
-                               xrt::bo::flags::host_only, kern.group_id(7));
-
-    // Register all host_only BOs with the DMA engine once at init time.
-    // Without this pre-sync the NPU DMA has no physical address for output/scratch
-    // buffers and aborts immediately on first dispatch.
-    ctx->bo_c.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-    ctx->bo_tmp.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-    ctx->bo_trace.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-
+    // --- Slot 0 (primary) ---
+    init_slot(ctx->slots[0],
+              resolve_path(xclbin_path, "GGML_XDNA_XCLBIN_PATH"),
+              resolve_path(instr_path,  "GGML_XDNA_INSTR_PATH"),
+              0);
     ctx->kernel_ready = true;
-    GGML_LOG_INFO("ggml_xdna: kernel ready — tile %lld×%lld×%lld\n",
-                  (long long)ctx->tile_m, (long long)ctx->tile_k,
-                  (long long)ctx->tile_n);
 
-    // --- Optional slot 2 (e.g. K=5632 for FFN down layers) ---
-    const char * xclbin_path2 = std::getenv("GGML_XDNA_XCLBIN_PATH_2");
-    const char * instr_path2  = std::getenv("GGML_XDNA_INSTR_PATH_2");
-    const char * tile_k2_str  = std::getenv("GGML_XDNA_TILE_K2");
-    if (xclbin_path2 && instr_path2 && tile_k2_str) {
+    // --- Optional slots 1–3 (env suffix _2, _3, _4) ---
+    static const char * const xclbin_vars[] = {
+        "GGML_XDNA_XCLBIN_PATH_2", "GGML_XDNA_XCLBIN_PATH_3", "GGML_XDNA_XCLBIN_PATH_4"
+    };
+    static const char * const instr_vars[] = {
+        "GGML_XDNA_INSTR_PATH_2", "GGML_XDNA_INSTR_PATH_3", "GGML_XDNA_INSTR_PATH_4"
+    };
+    static const char * const tile_k_vars[] = {
+        "GGML_XDNA_TILE_K2", "GGML_XDNA_TILE_K3", "GGML_XDNA_TILE_K4"
+    };
+    static const char * const tile_m_vars[] = {
+        "GGML_XDNA_TILE_M2", "GGML_XDNA_TILE_M3", "GGML_XDNA_TILE_M4"
+    };
+    static const char * const tile_n_vars[] = {
+        "GGML_XDNA_TILE_N2", "GGML_XDNA_TILE_N3", "GGML_XDNA_TILE_N4"
+    };
+
+    for (int i = 0; i < ggml_backend_xdna_context::MAX_SLOTS - 1; i++) {
+        const char * xp = std::getenv(xclbin_vars[i]);
+        const char * ip = std::getenv(instr_vars[i]);
+        const char * kv = std::getenv(tile_k_vars[i]);
+        if (!xp || !ip || !kv) { continue; }
+
+        const int64_t k = std::atoll(kv);
+        if (k <= 0) {
+            GGML_LOG_WARN("ggml_xdna: %s=%s invalid — skipping slot %d\n",
+                          tile_k_vars[i], kv, i + 1);
+            continue;
+        }
+
+        auto & sl    = ctx->slots[i + 1];
+        sl.tile_k    = k;
+        sl.tile_m    = 32; sl.tile_n = 32; // defaults
+        const char * mv = std::getenv(tile_m_vars[i]);
+        const char * nv = std::getenv(tile_n_vars[i]);
+        if (mv) { const int64_t v = std::atoll(mv); if (v > 0) { sl.tile_m = v; } }
+        if (nv) { const int64_t v = std::atoll(nv); if (v > 0) { sl.tile_n = v; } }
+
         try {
-            const int64_t k2 = std::atoll(tile_k2_str);
-            if (k2 <= 0) {
-                GGML_LOG_WARN("ggml_xdna: GGML_XDNA_TILE_K2=%s invalid — skipping slot 2\n", tile_k2_str);
-            } else {
-                ctx->tile_k2 = k2;
-                const char * tile_m2_str = std::getenv("GGML_XDNA_TILE_M2");
-                const char * tile_n2_str = std::getenv("GGML_XDNA_TILE_N2");
-                if (tile_m2_str) {
-                    const int64_t v = std::atoll(tile_m2_str);
-                    if (v > 0) { ctx->tile_m2 = v; }
-                }
-                if (tile_n2_str) {
-                    const int64_t v = std::atoll(tile_n2_str);
-                    if (v > 0) { ctx->tile_n2 = v; }
-                }
-
-                const std::string xclbin_str2 = resolve_path(xclbin_path2, "GGML_XDNA_XCLBIN_PATH_2");
-                const std::string instr_str2  = resolve_path(instr_path2,  "GGML_XDNA_INSTR_PATH_2");
-
-                xrt::xclbin bin2(xclbin_str2);
-                ctx->device.register_xclbin(bin2);
-                ctx->hw_ctx2 = std::make_unique<xrt::hw_context>(ctx->device, bin2.get_uuid());
-                ctx->matmul_kernel2 = std::make_unique<xrt::kernel>(*ctx->hw_ctx2, "MLIR_AIE");
-
-                ctx->instr_data2 = load_instr_file(instr_str2);
-                ctx->bo_instr2 = xrt::bo(ctx->device,
-                                          ctx->instr_data2.size() * sizeof(uint32_t),
-                                          xrt::bo::flags::cacheable,
-                                          ctx->matmul_kernel2->group_id(1));
-                std::memcpy(ctx->bo_instr2.map<uint32_t *>(),
-                            ctx->instr_data2.data(),
-                            ctx->instr_data2.size() * sizeof(uint32_t));
-                ctx->bo_instr2.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-
-                auto & kern2    = *ctx->matmul_kernel2;
-                ctx->bo_a2      = xrt::bo(ctx->device, (size_t)ctx->tile_m2 * ctx->tile_k2 * sizeof(int8_t),  xrt::bo::flags::host_only, kern2.group_id(3));
-                ctx->bo_b2      = xrt::bo(ctx->device, (size_t)ctx->tile_k2 * ctx->tile_n2 * sizeof(int8_t),  xrt::bo::flags::host_only, kern2.group_id(4));
-                ctx->bo_c2      = xrt::bo(ctx->device, (size_t)ctx->tile_m2 * ctx->tile_n2 * sizeof(int32_t), xrt::bo::flags::host_only, kern2.group_id(5));
-                ctx->bo_tmp2    = xrt::bo(ctx->device, 4, xrt::bo::flags::host_only, kern2.group_id(6));
-                ctx->bo_trace2  = xrt::bo(ctx->device, 4, xrt::bo::flags::host_only, kern2.group_id(7));
-
-                ctx->bo_c2.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-                ctx->bo_tmp2.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-                ctx->bo_trace2.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-
-                ctx->kernel2_ready = true;
-                GGML_LOG_INFO("ggml_xdna: slot 2 ready — tile %lld×%lld×%lld\n",
-                              (long long)ctx->tile_m2, (long long)ctx->tile_k2,
-                              (long long)ctx->tile_n2);
-            }
+            init_slot(sl,
+                      resolve_path(xp, xclbin_vars[i]),
+                      resolve_path(ip, instr_vars[i]),
+                      i + 1);
         } catch (const std::exception & e) {
-            GGML_LOG_WARN("ggml_xdna: slot 2 init failed: %s\n", e.what());
+            GGML_LOG_WARN("ggml_xdna: slot %d init failed: %s\n", i + 1, e.what());
+            sl.ready = false;
         }
     }
 
