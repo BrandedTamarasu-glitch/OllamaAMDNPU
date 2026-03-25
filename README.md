@@ -198,6 +198,14 @@ Notes:
 
 ---
 
+## AI Assistance
+
+This project was designed and implemented with the assistance of **Claude Sonnet 4.6** (`claude-sonnet-4-6`) by [Anthropic](https://www.anthropic.com), accessed via [Claude Code](https://claude.ai/code).
+
+AI assistance covered: backend architecture, XRT kernel dispatch design, tile loop optimisation, performance debugging, benchmarking tooling, and documentation.
+
+---
+
 ## Upstream
 
 This repo tracks [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp). The XDNA backend lives entirely in `ggml/src/ggml-xdna/`.
