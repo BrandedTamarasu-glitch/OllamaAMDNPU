@@ -219,15 +219,17 @@ All measurements: Meta-Llama-3.1-8B-Instruct Q4_K_M, `llama-bench -r 1 --no-warm
 
 | Backend | pp=512 | pp=2048 | pp=4096 | pp=8192 | Decode |
 |---------|--------|---------|---------|---------|--------|
-| CPU only | 4.5 t/s | 4.4 t/s | 4.0 t/s | 3.6 t/s | ~4.4 t/s |
-| NPU (4 slots, ub=512) | 10.2 t/s | **12.9 t/s** | 11.7 t/s | 8.9 t/s | ~4.1 t/s |
-| Vulkan iGPU (KHR_coopmat, ngl=99) | 895 t/s | 849 t/s | 776 t/s | 657 t/s | ~43 t/s |
+| CPU only | 4.6 t/s | 4.3 t/s | 4.0 t/s | 3.6 t/s | ~4.4 t/s |
+| NPU 1-col (Phase 5, ub=512) | 10.2 t/s | 12.9 t/s | 11.7 t/s | 8.9 t/s | ~4.1 t/s |
+| **NPU 4-col (Phase 6, ub=512)** | **13.7 t/s** | **19.5 t/s** | **16.2 t/s** | **10.9 t/s** | ~4.1 t/s |
+| Vulkan iGPU (KHR_coopmat, ngl=99) | 833 t/s | 783 t/s | 696 t/s | 609 t/s | ~43 t/s |
 
 Notes:
-- **NPU is 2–3× faster than CPU** at all context lengths, with peak efficiency at pp=2048 (one full XDNA2 tile)
+- **Phase 6 (4-col NPU, TILE_N=256)**: +35–51% prefill vs Phase 5 — uses all 4 AIE columns in parallel
+- **NPU is 3–5× faster than CPU** at all context lengths; peak at pp=2048 (19.5 t/s, full tile utilisation)
 - NPU prefill degrades at long context because attention score matmuls (K=seq_len, variable) fall back to CPU; only fixed-K projection matmuls offload to NPU
 - `--ubatch-size 2048` does **not** improve NPU throughput — larger CPU-side attention batches (O(n²)) outweigh better tile utilisation
-- Vulkan degrades ~27% from 512→8192 tokens; NPU degrades ~13% (lower absolute speed but more context-resilient)
+- Vulkan degrades ~27% from 512→8192 tokens; NPU 4-col degrades ~21% (more context-resilient than GPU)
 - 8k context validated without OOM (KV cache ≈ 1 GiB; model ≈ 4.6 GiB; 30 GiB RAM is sufficient)
 
 ### Power (SoC PPT, measured via `tools/bench-power.sh`)
@@ -257,6 +259,7 @@ Notes:
 | 3 | ✅ Done | 8B model support — K=4096 and K=14336 slots, tile-loop optimisation (+15–28% prefill over CPU) |
 | 4 | ✅ Done | Workload-isolation characterisation — power measurement vs Vulkan; NPU confirmed as non-competing backend (dedicated XDNA2 silicon); `bench-power.sh` tooling |
 | 5 | ✅ Done | Long context (8k–32k) — validated at 8k with 30 GiB RAM; NPU 2–3× over CPU; peaks at pp=2048; attention falls to CPU at long context (variable-K not covered by xclbins); `bench-context.sh` tooling |
+| 6 | ✅ Done | Multi-core NPU (4-col, TILE_N=256) — 4× AIE column parallelism; peak pp=2048: 19.5 t/s (+51% vs Phase 5); all 4 K-slots upgraded to 4-col xclbins |
 
 ---
 
