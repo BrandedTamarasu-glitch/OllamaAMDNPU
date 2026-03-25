@@ -84,6 +84,21 @@
 // Context
 // ---------------------------------------------------------------------------
 
+// File-scope env helper — validates range and warns on out-of-range values.
+// Shared by the context constructor and try_init_context optional-slot parsing.
+static int64_t xdna_env_int(const char * name, int64_t def, int64_t max_val) {
+    const char * v = std::getenv(name);
+    if (!v) { return def; }
+    const int64_t val = std::atoll(v);
+    if (val <= 0 || val > max_val) {
+        GGML_LOG_WARN("ggml_xdna: %s=%s is out of range (1–%lld), "
+                      "using default %lld\n",
+                      name, v, (long long)max_val, (long long)def);
+        return def;
+    }
+    return val;
+}
+
 struct ggml_backend_xdna_context {
     xrt::device device;
 
@@ -118,11 +133,19 @@ struct ggml_backend_xdna_context {
     // Per-tile NPU kernel timeout in milliseconds.
     int64_t timeout_ms = 5000;
 
+    // True for the process-lifetime singleton allocated in ggml_backend_xdna_reg().
+    // Used by ggml_backend_xdna_free() to skip deletion of the singleton.
+    bool is_probe_singleton = false;
+
     // Weight cache: quantise each weight tensor once; reuse on subsequent tokens.
     // Key = src0->data pointer (stable for model weights across forward passes).
+    // Note: no size bound — grows monotonically with distinct weight pointers loaded.
+    // For typical LLM inference this is bounded by the model's layer count.
     struct WeightEntry {
         std::vector<int8_t> quant;   // [M*K] int8
         std::vector<float>  scales;  // [M]   per-row scales
+        int64_t cached_m = 0;        // M at quantisation time (for invalidation)
+        int64_t cached_k = 0;        // K at quantisation time (for invalidation)
     };
     std::unordered_map<const void *, WeightEntry> weight_cache;
 
@@ -143,26 +166,14 @@ struct ggml_backend_xdna_context {
     std::mutex dispatch_mutex;
 
     explicit ggml_backend_xdna_context() {
-        auto env_int = [](const char * name, int64_t def, int64_t max_val) -> int64_t {
-            const char * v = std::getenv(name);
-            if (!v) { return def; }
-            const int64_t val = std::atoll(v);
-            if (val <= 0 || val > max_val) {
-                GGML_LOG_WARN("ggml_xdna: %s=%s is out of range (1–%lld), "
-                              "using default %lld\n",
-                              name, v, (long long)max_val, (long long)def);
-                return def;
-            }
-            return val;
-        };
         // Slot 0 tile dims read here; extras are read during try_init_context.
-        slots[0].tile_m = env_int("GGML_XDNA_TILE_M", 32, 131072);
-        slots[0].tile_k = env_int("GGML_XDNA_TILE_K", 32, 131072);
-        slots[0].tile_n = env_int("GGML_XDNA_TILE_N", 32, 131072);
-        min_batch       = env_int("GGML_XDNA_MIN_BATCH", 32768, INT64_MAX);
-        min_n           = env_int("GGML_XDNA_MIN_N",     2,     131072);
-        max_n           = env_int("GGML_XDNA_MAX_N",     131072, 131072);
-        timeout_ms      = env_int("GGML_XDNA_TIMEOUT_MS", 5000, INT64_MAX);
+        slots[0].tile_m = xdna_env_int("GGML_XDNA_TILE_M", 32, 131072);
+        slots[0].tile_k = xdna_env_int("GGML_XDNA_TILE_K", 32, 131072);
+        slots[0].tile_n = xdna_env_int("GGML_XDNA_TILE_N", 32, 131072);
+        min_batch       = xdna_env_int("GGML_XDNA_MIN_BATCH", 32768, INT64_MAX);
+        min_n           = xdna_env_int("GGML_XDNA_MIN_N",     2,     131072);
+        max_n           = xdna_env_int("GGML_XDNA_MAX_N",     131072, INT64_MAX);
+        timeout_ms      = xdna_env_int("GGML_XDNA_TIMEOUT_MS", 5000, INT64_MAX);
     }
 
     // Returns the index of the first slot whose tile_k matches K, or -1.
@@ -277,15 +288,27 @@ static bool ggml_backend_xdna_mul_mat(ggml_backend_xdna_context * ctx,
     const int64_t N = ne11; // activation batch
 
     const int slot_idx = ctx->find_slot(K);
-    GGML_ASSERT(slot_idx >= 0 && "mul_mat called for K with no matching slot");
+    if (slot_idx < 0) {
+        GGML_LOG_ERROR("ggml_xdna: mul_mat called for K=%lld with no matching slot — "
+                       "supports_op should have prevented this\n", (long long)K);
+        return false;
+    }
     const auto & sl = ctx->slots[slot_idx];
     const int64_t tm = sl.tile_m;
     const int64_t tk = sl.tile_k;
     const int64_t tn = sl.tile_n;
 
     // --- Weight cache: quantise src0 once per unique tensor, reuse on every token ---
-    auto wit = ctx->weight_cache.find(src0->data);
-    if (wit == ctx->weight_cache.end()) {
+    // Invalidate stale entry if the same pointer is reused for different dimensions.
+    {
+        auto stale = ctx->weight_cache.find(src0->data);
+        if (stale != ctx->weight_cache.end() &&
+            (stale->second.cached_m != M || stale->second.cached_k != K)) {
+            ctx->weight_cache.erase(stale);
+        }
+    }
+    auto & entry = ctx->weight_cache[src0->data]; // inserts default-constructed entry on miss
+    if (entry.quant.empty()) {
         ctx->fp32_buf.resize(M * K);
         if (src0->type == GGML_TYPE_F32) {
             for (int64_t m = 0; m < M; m++) {
@@ -300,14 +323,14 @@ static bool ggml_backend_xdna_mul_mat(ggml_backend_xdna_context * ctx,
                              ctx->fp32_buf.data() + m * K, K);
             }
         }
-        auto & entry = ctx->weight_cache[src0->data];
         entry.quant.resize(M * K);
         entry.scales.resize(M);
+        entry.cached_m = M;
+        entry.cached_k = K;
         quant_f32_to_int8(ctx->fp32_buf.data(), entry.quant.data(), M, K, entry.scales.data());
-        wit = ctx->weight_cache.find(src0->data);
     }
-    const int8_t * qa = wit->second.quant.data();
-    const float  * sa = wit->second.scales.data();
+    const int8_t * qa = entry.quant.data();
+    const float  * sa = entry.scales.data();
 
     // --- Dequantise src1 (activations) to F32 — changes every token, not cached ---
     ctx->fp32_buf.resize(N * K);
@@ -349,7 +372,8 @@ static bool ggml_backend_xdna_mul_mat(ggml_backend_xdna_context * ctx,
     for (int64_t n0 = 0; n0 < N; n0 += tn) {
         // Fill tile_b from quant_b[n0:n0+tn, 0:K] transposed to [K, tn].
         // quant_b is [N, K]; kernel expects B in [K, N] layout.
-        // Skip zero-fill for full tiles — all tn columns will be written below.
+        // Zero-fill partial tiles only; full tiles (n0+tn <= N) have all tn columns
+        // written by the loop below, so pre-clearing would be redundant.
         if ((n0 + tn) > N) { std::fill(ctx->tile_b.begin(), ctx->tile_b.end(), 0); }
         for (int64_t ni = 0; ni < tn && (n0 + ni) < N; ni++) {
             for (int64_t ki = 0; ki < tk; ki++) {
@@ -360,7 +384,8 @@ static bool ggml_backend_xdna_mul_mat(ggml_backend_xdna_context * ctx,
 
         for (int64_t m0 = 0; m0 < M; m0 += tm) {
             // Fill tile_a from cached qa[m0:m0+tm, 0:K].
-            // Skip zero-fill for full tiles — all tm rows will be written below.
+            // Zero-fill partial tiles only; full tiles (m0+tm <= M) have all tm rows
+            // written by the memcpy loop below (K bytes each), so pre-clearing would be redundant.
             if ((m0 + tm) > M) { std::fill(ctx->tile_a.begin(), ctx->tile_a.end(), 0); }
             for (int64_t mi = 0; mi < tm && (m0 + mi) < M; mi++) {
                 std::memcpy(ctx->tile_a.data() + mi * tk,
@@ -401,10 +426,9 @@ static const char * ggml_backend_xdna_get_name(ggml_backend_t backend) {
 }
 
 static void ggml_backend_xdna_free(ggml_backend_t backend) {
-    // g_probe_ctx is a process-lifetime singleton (never freed); only delete
-    // contexts that were independently allocated.
+    // Probe singleton is process-lifetime; only delete independently allocated contexts.
     auto * ctx = (ggml_backend_xdna_context *) backend->context;
-    if (ctx != g_probe_ctx) {
+    if (!ctx->is_probe_singleton) {
         delete ctx;
     }
     delete backend;
@@ -681,8 +705,8 @@ static bool try_init_context(ggml_backend_xdna_context * ctx) {
         sl.tile_m    = 32; sl.tile_n = 32; // defaults
         const char * mv = std::getenv(tile_m_vars[i]);
         const char * nv = std::getenv(tile_n_vars[i]);
-        if (mv) { const int64_t v = std::atoll(mv); if (v > 0) { sl.tile_m = v; } }
-        if (nv) { const int64_t v = std::atoll(nv); if (v > 0) { sl.tile_n = v; } }
+        if (mv) { sl.tile_m = xdna_env_int(tile_m_vars[i], 32, 131072); }
+        if (nv) { sl.tile_n = xdna_env_int(tile_n_vars[i], 32, 131072); }
 
         try {
             init_slot(sl,
@@ -734,6 +758,7 @@ ggml_backend_reg_t ggml_backend_xdna_reg(void) {
     static std::once_flag g_probe_once;
     std::call_once(g_probe_once, []() {
         auto * probe = new ggml_backend_xdna_context();
+        probe->is_probe_singleton = true;
         try {
             // g_probe_ctx is reused by ggml_backend_xdna_init(); only one hw_context
             // is ever opened on this device — no XDNA2 firmware arbitration conflict.
