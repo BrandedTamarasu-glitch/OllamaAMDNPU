@@ -131,6 +131,22 @@ cmake --build build --parallel
 
 ---
 
+## Testing
+
+The quantisation helper (`ggml-xdna-quant.h`) has a standalone correctness test with no XRT dependency:
+
+```bash
+g++ -std=c++17 -I ggml/src/ggml-xdna \
+    -o /tmp/test-xdna-correctness \
+    ggml/src/ggml-xdna/test-xdna-correctness.cpp \
+  && /tmp/test-xdna-correctness
+# 58 passed  |  0 failed
+```
+
+Covers: basic quantisation, zero row, NaN/Inf rows, mixed finite/non-finite, negative values, multi-row independent scales, clamping, and re-quantisation after dimension change.
+
+---
+
 ## Running
 
 ### Environment variables
