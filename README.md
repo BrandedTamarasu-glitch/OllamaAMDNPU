@@ -52,6 +52,52 @@ ulimit -Hl   # must show: unlimited
 
 ---
 
+## Setup tools
+
+Two scripts in `tools/` cover environment setup and validation.
+
+### Preflight check
+
+After completing the steps below, run this to validate your entire environment before attempting inference:
+
+```bash
+bash tools/setup-check.sh
+```
+
+It checks every prerequisite — driver, XRT, memlock, build output, xclbin paths — and prints a numbered list of what still needs doing:
+
+```
+1. Hardware & kernel driver
+✔  /dev/accel/accel0 present
+✔  Current user can read /dev/accel/accel0
+
+2. XRT (Xilinx Runtime)
+✔  xrt-smi found (version: 2.21.75)
+...
+
+Summary:  17 passed  |  0 warnings  |  0 failed
+
+All checks passed — you are ready to run NPU inference.
+```
+
+If anything fails, the script explains exactly what to fix.
+
+### Environment variable template
+
+Instead of manually writing all `GGML_XDNA_*` exports, start from the provided template:
+
+```bash
+# View the template
+cat tools/env-template.sh
+
+# Copy the exports into your shell profile, then edit paths
+nano ~/.zshrc     # or ~/.bashrc
+```
+
+The template covers all 4 xclbin slots with inline `make` commands for building each one.
+
+---
+
 ## Building the xclbins
 
 The xclbins are built with mlir-aie's `matrix_multiplication` example. For K=2048 (attention layers) and K=5632 (FFN down layers) with 1-core dispatch:
