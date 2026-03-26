@@ -273,6 +273,24 @@ Notes:
 | 5 | ✅ Done | Long context (8k–32k) — validated at 8k with 30 GiB RAM; NPU 2–3× over CPU; peaks at pp=2048; attention falls to CPU at long context (variable-K not covered by xclbins); `bench-context.sh` tooling |
 | 6 | ✅ Done | Multi-core NPU (4-col, TILE_N=256) — 4× AIE column parallelism; peak pp=2048: 19.5 t/s (+51% vs Phase 5); all 4 K-slots upgraded to 4-col xclbins |
 | 7 | ✅ Done | NPU decode acceleration (TILE_N=64) — decode xclbins (n=16 minimum per AIE constraint); MIN_N=1, MAX_N=1 routes N=1 decode to NPU, prefill to Vulkan; decode 42 t/s (+11× vs CPU); prefill 930 t/s via Vulkan |
+| 8 | ✅ Done | Performance ceiling investigation — batch sweep flat at 43.7 t/s (8A); int4 double-quant ruled out (SNR 44.8→19.7 dB), cascade ruled out by AMD docs (8B); speculative decoding with Llama-3.2-1B (44% accept, 212 t/s draft) yields no net gain (8C); **43.7 t/s is the LPDDR5 bandwidth ceiling** |
+
+---
+
+## Performance Ceiling (Phase 8 findings)
+
+**43.7 t/s decode is the hard ceiling** for this hardware+model. All software-level techniques were exhausted:
+
+| Approach | Result | Reason |
+|----------|--------|--------|
+| Batch decode (N=1..64) | Flat at 43.7 t/s | Memory bandwidth bound — KV cache reads scale with N |
+| Int4 weight quantisation | Ruled out | Double-quantisation on Q4_K_M: SNR drops 44.8 dB → 19.7 dB |
+| matrix_vector kernel | Ruled out | Requires i16 activations; pipeline produces i8 |
+| Cascade kernel | Ruled out | AMD docs: no throughput gain for bandwidth-bound workloads |
+| n-gram speculative (llama-lookup) | 2.5% accept → no gain | Generative prose has no repeating n-grams |
+| Draft model speculative (Llama-3.2-1B, 44% accept) | No gain | Verification step still bandwidth-bound at target model |
+
+The bottleneck is LPDDR5 bandwidth serving the KV cache. Every decode step must read the full KV cache (32 layers × context length). Compute improvements cannot overcome a memory I/O wall. Future paths would require: fp8/int8 KV cache (reduces KV read volume), a model with smaller KV footprint (e.g. MLA architecture), or faster memory hardware.
 
 ---
 

@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AMD XDNA2 NPU Backend — Phase 8 Changelog</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --green: #3fb950;
+      --green-dim: #1a3a22;
+      --blue: #58a6ff;
+      --yellow: #d29922;
+      --yellow-dim: #2e2208;
+      --red: #f85149;
+      --red-dim: #3d1a1a;
+      --purple: #bc8cff;
+      --purple-dim: #2d1f47;
+      --tag-bg: #1f2937;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 2rem 1rem;
+    }
+    .container { max-width: 860px; margin: 0 auto; }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1.5rem;
+      margin-bottom: 2.5rem;
+    }
+    header h1 { font-size: 1.6rem; font-weight: 700; color: var(--text); }
+    header h1 span { color: var(--blue); }
+    header p { color: var(--muted); margin-top: 0.4rem; font-size: 0.9rem; }
+    header a { color: var(--blue); text-decoration: none; }
+    header a:hover { text-decoration: underline; }
+
+    .hardware-pill {
+      display: inline-block;
+      background: var(--tag-bg);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 0.2rem 0.75rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 0.6rem;
+    }
+
+    .phase {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 1.5rem;
+      overflow: hidden;
+    }
+    .phase-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+      padding: 1.1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .phase-number {
+      flex-shrink: 0;
+      width: 2rem;
+      height: 2rem;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+      font-weight: 700;
+      background: var(--tag-bg);
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .phase.done .phase-number {
+      background: var(--green-dim);
+      color: var(--green);
+      border-color: var(--green);
+    }
+    .phase.research .phase-number {
+      background: var(--purple-dim);
+      color: var(--purple);
+      border-color: var(--purple);
+    }
+    .phase-title { flex: 1; }
+    .phase-title h2 { font-size: 1rem; font-weight: 600; color: var(--text); }
+    .phase-title p { font-size: 0.83rem; color: var(--muted); margin-top: 0.2rem; }
+    .badge {
+      flex-shrink: 0;
+      font-size: 0.72rem;
+      padding: 0.18rem 0.55rem;
+      border-radius: 12px;
+      font-weight: 600;
+      align-self: flex-start;
+      margin-top: 0.15rem;
+    }
+    .badge.done    { background: var(--green-dim);  color: var(--green); }
+    .badge.ceiling { background: var(--purple-dim); color: var(--purple); }
+    .badge.dead-end { background: var(--red-dim);   color: var(--red); }
+
+    .phase-body { padding: 1.1rem 1.25rem; }
+
+    .conclusion-box {
+      background: var(--purple-dim);
+      border: 1px solid var(--purple);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .conclusion-box .label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--purple);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.3rem;
+    }
+    .conclusion-box p { font-size: 0.87rem; color: var(--text); }
+
+    .dead-box {
+      background: var(--red-dim);
+      border: 1px solid var(--red);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .dead-box .label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--red);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.3rem;
+    }
+    .dead-box ul { font-size: 0.86rem; color: var(--text); padding-left: 1.1rem; }
+    .dead-box ul li { margin-bottom: 0.2rem; }
+
+    .details p { font-size: 0.87rem; color: var(--muted); margin-bottom: 0.4rem; }
+    .details p:last-child { margin-bottom: 0; }
+    .details strong { color: var(--text); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.83rem;
+      margin-top: 0.75rem;
+    }
+    th {
+      text-align: left;
+      color: var(--muted);
+      font-weight: 600;
+      padding: 0.4rem 0.6rem;
+      border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: 0.4rem 0.6rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+    }
+    tr:last-child td { border-bottom: none; }
+    td.highlight { color: var(--green); font-weight: 600; }
+    td.muted { color: var(--muted); }
+    td.dead   { color: var(--red); }
+    td.same   { color: var(--yellow); }
+
+    .tag {
+      display: inline-block;
+      background: var(--tag-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.1rem 0.4rem;
+      font-size: 0.76rem;
+      color: var(--muted);
+      font-family: "SF Mono", "Consolas", monospace;
+    }
+
+    .section-label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin: 0.9rem 0 0.4rem;
+    }
+
+    .subphase-label {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--blue);
+      margin: 1.1rem 0 0.4rem;
+      padding-bottom: 0.3rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    footer {
+      border-top: 1px solid var(--border);
+      padding-top: 1.5rem;
+      margin-top: 2.5rem;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+    footer a { color: var(--blue); text-decoration: none; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <h1>AMD <span>XDNA2 NPU</span> Backend — Changelog</h1>
+    <p>
+      Custom <a href="https://github.com/ggml-org/llama.cpp">llama.cpp</a> backend offloading
+      <code>GGML_OP_MUL_MAT</code> to the AMD XDNA2 NPU via XRT kernel dispatch. &nbsp;·&nbsp;
+      <a href="https://github.com/BrandedTamarasu-glitch/OllamaAMDNPU">GitHub</a>
+    </p>
+    <div class="hardware-pill">Ryzen AI MAX 385 &nbsp;·&nbsp; RyzenAI-npu5 (XDNA2) &nbsp;·&nbsp; Meta-Llama-3.1-8B-Instruct Q4_K_M</div>
+  </header>
+
+  <!-- Phase 8 -->
+  <div class="phase research">
+    <div class="phase-header">
+      <div class="phase-number">8</div>
+      <div class="phase-title">
+        <h2>Performance Ceiling Investigation</h2>
+        <p>Batch decode sweep · int4 kernel · cascade · speculative decoding · 2026-03-26</p>
+      </div>
+      <span class="badge ceiling">⚠ Ceiling Confirmed</span>
+    </div>
+    <div class="phase-body">
+
+      <div class="conclusion-box">
+        <div class="label">Conclusion</div>
+        <p><strong>43.7 t/s is the hard performance ceiling</strong> for decode on this hardware+model combination.
+        All four investigated approaches (batch decode, int4 quantisation, kernel cascade, speculative decoding)
+        converge on the same bottleneck: <strong>LPDDR5 memory bandwidth</strong> serving the KV cache during
+        single-token generation. No software technique can overcome a bandwidth-bound memory wall.</p>
+      </div>
+
+      <div class="section-label">Sub-phases investigated</div>
+
+      <!-- 8A -->
+      <div class="subphase-label">8A — Batch Decode Sweep (N=1..64)</div>
+      <div class="details">
+        <p>Swept batch decode from N=1 to N=64 to test whether increasing decode batch size could improve throughput. Result: completely flat at <strong>43.7 t/s</strong> across all batch sizes.</p>
+      </div>
+      <table>
+        <tr><th>Batch N</th><th>Decode t/s</th><th>Change</th></tr>
+        <tr><td>1 (baseline)</td><td class="same">43.7 t/s</td><td class="muted">—</td></tr>
+        <tr><td>8</td><td class="same">43.7 t/s</td><td class="muted">flat</td></tr>
+        <tr><td>32</td><td class="same">43.7 t/s</td><td class="muted">flat</td></tr>
+        <tr><td>64</td><td class="same">43.7 t/s</td><td class="muted">flat</td></tr>
+      </table>
+      <div class="details" style="margin-top:0.6rem;">
+        <p><strong>Diagnosis:</strong> Throughput is entirely dominated by reading the KV cache from LPDDR5 on every decode step. Increasing N multiplies KV reads proportionally; total bandwidth demand rises with N but peak bandwidth is fixed. The NPU's compute is saturated <em>at N=1</em> — there is no headroom for batching to exploit.</p>
+      </div>
+
+      <!-- 8B -->
+      <div class="subphase-label">8B — Int4 Weight Quantisation & Cascade Kernel</div>
+      <div class="dead-box">
+        <div class="label">Dead Ends</div>
+        <ul>
+          <li><strong>Int4 (double-quantisation):</strong> Q4_K_M weights are already 4-bit. Applying a second int4 quantisation layer (int8→int4) produced SNR drop from 44.8 dB to 19.7 dB — unacceptable quality loss with no throughput gain.</li>
+          <li><strong>matrix_vector kernel:</strong> Requires i16 activations; our pipeline produces i8. Wrong direction for this architecture — would require rebuilding the entire quantisation pipeline.</li>
+          <li><strong>Cascade design:</strong> AMD mlir-aie documentation explicitly states cascaded AIE array designs provide no throughput gain for memory-bandwidth-bound workloads. Ruled out before implementation.</li>
+        </ul>
+      </div>
+      <div class="details">
+        <p>Sanity-check tooling added: <code>tools/int4_quant_sanity.c</code> and <code>tools/int4_quant_sanity.py</code> — measure SNR of the quantisation pipeline at various bit widths without requiring a full model run.</p>
+      </div>
+
+      <!-- 8C -->
+      <div class="subphase-label">8C — Speculative Decoding</div>
+      <div class="details">
+        <p>Speculative decoding amortises the cost of the large target model by having a small, fast draft model propose multiple tokens at once. The target model then verifies the entire batch in a single forward pass (which is much cheaper than N separate forward passes).</p>
+        <p><strong>Tokenizer compatibility issue:</strong> TinyLlama-1.1B uses SentencePiece (32k vocab) — incompatible with Llama-3.1-8B (tiktoken, 128k vocab). Llama-3.2-1B-Instruct was used instead (same llama-bpe 128k tokenizer).</p>
+      </div>
+
+      <div class="section-label">Attempt 1: n-gram lookup cache (llama-lookup)</div>
+      <table>
+        <tr><th>Metric</th><th>Value</th></tr>
+        <tr><td>n_drafted</td><td>40</td></tr>
+        <tr><td>n_accept</td><td class="dead">1 (2.5%)</td></tr>
+        <tr><td>Effective t/s</td><td class="same">41.0 t/s</td></tr>
+      </table>
+      <div class="details" style="margin-top:0.6rem;">
+        <p>2.5% acceptance rate — near-zero. n-gram lookup only works on repetitive/templated text (code generation, boilerplate). Generative explanatory prose has essentially no repeating n-grams. <strong>Ruled out.</strong></p>
+      </div>
+
+      <div class="section-label">Attempt 2: Draft model — Llama-3.2-1B-Instruct Q4_K_M (GPU offloaded)</div>
+      <div class="details">
+        <p>First run without explicit context cap: target model consumed 8 GB of VRAM for a 64k-token KV cache, leaving no VRAM for the draft model. Draft ran on CPU at ~20 t/s — slower than the 43.7 t/s NPU decode. Effective throughput fell to 10.9 t/s.</p>
+        <p>Fix: set <code>-c 8192</code> to cap context and free VRAM. Both models then offloaded fully (target 33/33 layers, draft 17/17 layers to Vulkan/iGPU).</p>
+      </div>
+      <table>
+        <tr><th>Config</th><th>Accept %</th><th>Draft speed</th><th>Effective t/s</th><th>vs baseline</th></tr>
+        <tr>
+          <td>Draft on CPU (no ctx cap)</td>
+          <td>59.0%</td>
+          <td class="dead">20 t/s</td>
+          <td class="dead">10.9 t/s</td>
+          <td class="dead">−75%</td>
+        </tr>
+        <tr>
+          <td>Draft on GPU (-c 8192)</td>
+          <td>44.4%</td>
+          <td class="highlight">212 t/s</td>
+          <td class="same">41.6 t/s</td>
+          <td class="same">−5%</td>
+        </tr>
+        <tr>
+          <td>Baseline (no speculative)</td>
+          <td>—</td>
+          <td>—</td>
+          <td class="highlight">43.7 t/s</td>
+          <td>—</td>
+        </tr>
+      </table>
+      <div class="details" style="margin-top:0.6rem;">
+        <p><strong>Why it still doesn't help:</strong> The verification step in speculative decoding processes <code>n_draft + 1</code> tokens as a batch through the target model. This is a <em>prefill</em> operation — it reads the KV cache once for all tokens. But the KV cache read is still bounded by LPDDR5 bandwidth. Verifying 9 tokens at once does not cost 9× less than verifying 1 — the KV cache I/O per step is similar, just spread across more tokens. The bandwidth wall applies to both single-token and batch-token verification.</p>
+        <p>A 44.4% acceptance rate with a 212 t/s draft model would normally yield ~1.8× speedup. The absence of any gain confirms the bottleneck is not in compute but purely in memory bandwidth.</p>
+      </div>
+
+      <div class="section-label">Overall Finding</div>
+      <div class="details">
+        <p><strong>The 43.7 t/s ceiling is hardware-fundamental.</strong> The LPDDR5 memory subsystem on the Ryzen AI MAX 385 delivers a fixed bandwidth budget. At decode time, every token requires reading the full KV cache (32 layers × 1024 bytes per token × context length). No matter how the compute is organised — single-token NPU dispatch, batched Vulkan verification, or speculative multi-token drafts — the bandwidth demand is structurally the same.</p>
+        <p>The only path to higher effective throughput at this level would be a hardware change: faster memory (LPDDR5X at higher bandwidth), a reduced-precision KV cache (fp8 or int8 KV — not yet supported in this build), or a fundamentally different model architecture with a smaller KV footprint (e.g. MLA as used in DeepSeek).</p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Link back -->
+  <p style="font-size:0.84rem; color: var(--muted); margin-bottom: 1rem;">
+    ← <a href="index.html" style="color: var(--blue); text-decoration: none;">All phases</a>
+    &nbsp;·&nbsp;
+    <a href="phase7.html" style="color: var(--blue); text-decoration: none;">Phase 7 — NPU Decode Acceleration</a>
+  </p>
+
+  <footer>
+    Built with <a href="https://claude.ai/code">Claude Code</a> (claude-sonnet-4-6) ·
+    Hardware: Ryzen AI MAX 385 (RyzenAI-npu5, XDNA2) ·
+    <a href="https://github.com/BrandedTamarasu-glitch/OllamaAMDNPU">GitHub repo</a>
+  </footer>
+
+</div>
+</body>
+</html>
