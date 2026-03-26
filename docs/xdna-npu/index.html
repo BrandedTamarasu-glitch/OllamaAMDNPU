@@ -6,103 +6,36 @@
   <title>AMD XDNA2 NPU Backend — Changelog Index</title>
   <style>
     :root {
-      --bg: #0d1117;
-      --surface: #161b22;
-      --border: #30363d;
-      --text: #e6edf3;
-      --muted: #8b949e;
-      --green: #3fb950;
-      --green-dim: #1a3a22;
-      --blue: #58a6ff;
-      --tag-bg: #1f2937;
+      --bg: #0d1117; --surface: #161b22; --border: #30363d;
+      --text: #e6edf3; --muted: #8b949e; --green: #3fb950;
+      --green-dim: #1a3a22; --blue: #58a6ff; --tag-bg: #1f2937;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      padding: 2rem 1rem;
-    }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; padding: 2rem 1rem; }
     .container { max-width: 680px; margin: 0 auto; }
-
-    header {
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 1.5rem;
-      margin-bottom: 2rem;
-    }
+    header { border-bottom: 1px solid var(--border); padding-bottom: 1.5rem; margin-bottom: 2rem; }
     header h1 { font-size: 1.5rem; font-weight: 700; }
     header h1 span { color: var(--blue); }
     header p { color: var(--muted); margin-top: 0.4rem; font-size: 0.88rem; }
     header a { color: var(--blue); text-decoration: none; }
     header a:hover { text-decoration: underline; }
-
-    .hardware-pill {
-      display: inline-block;
-      background: var(--tag-bg);
-      border: 1px solid var(--border);
-      border-radius: 20px;
-      padding: 0.2rem 0.75rem;
-      font-size: 0.78rem;
-      color: var(--muted);
-      margin-top: 0.6rem;
-    }
-
-    .entry {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      padding: 0.9rem 1rem;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      margin-bottom: 0.6rem;
-      text-decoration: none;
-      color: var(--text);
-      transition: border-color 0.15s;
-    }
+    .hardware-pill { display: inline-block; background: var(--tag-bg); border: 1px solid var(--border); border-radius: 20px; padding: 0.2rem 0.75rem; font-size: 0.78rem; color: var(--muted); margin-top: 0.6rem; }
+    .entry { display: flex; align-items: center; gap: 1rem; padding: 0.9rem 1rem; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 0.6rem; text-decoration: none; color: var(--text); transition: border-color 0.15s; }
     .entry:hover { border-color: var(--blue); }
-
-    .phase-badge {
-      flex-shrink: 0;
-      width: 2rem;
-      height: 2rem;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 0.78rem;
-      font-weight: 700;
-      background: var(--green-dim);
-      color: var(--green);
-      border: 1px solid var(--green);
-    }
-
+    .phase-badge { flex-shrink: 0; width: 2rem; height: 2rem; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.78rem; font-weight: 700; background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
     .entry-body { flex: 1; }
     .entry-body h2 { font-size: 0.92rem; font-weight: 600; }
     .entry-body p { font-size: 0.8rem; color: var(--muted); margin-top: 0.15rem; }
-
     .arrow { color: var(--muted); font-size: 1rem; }
-
-    footer {
-      border-top: 1px solid var(--border);
-      padding-top: 1.25rem;
-      margin-top: 2rem;
-      font-size: 0.8rem;
-      color: var(--muted);
-    }
+    footer { border-top: 1px solid var(--border); padding-top: 1.25rem; margin-top: 2rem; font-size: 0.8rem; color: var(--muted); }
     footer a { color: var(--blue); text-decoration: none; }
   </style>
 </head>
 <body>
 <div class="container">
-
   <header>
     <h1>AMD <span>XDNA2 NPU</span> Backend — Changelogs</h1>
-    <p>
-      Phase-by-phase progress on the custom llama.cpp XDNA2 backend. &nbsp;·&nbsp;
-      <a href="https://github.com/BrandedTamarasu-glitch/OllamaAMDNPU">GitHub</a>
-    </p>
+    <p>Phase-by-phase progress on the custom llama.cpp XDNA2 backend. &nbsp;·&nbsp; <a href="https://github.com/BrandedTamarasu-glitch/OllamaAMDNPU">GitHub</a></p>
     <div class="hardware-pill">Ryzen AI MAX 385 &nbsp;·&nbsp; RyzenAI-npu5 (XDNA2)</div>
   </header>
 
@@ -115,11 +48,64 @@
     <span class="arrow">›</span>
   </a>
 
+  <a class="entry" href="phase6.html">
+    <div class="phase-badge">6</div>
+    <div class="entry-body">
+      <h2>Phase 6 — Multi-Core NPU (4-Column, TILE_N=256)</h2>
+      <p>pp2048: 19.5 t/s (+51% vs Phase 5) · all 4 K-slots on 4-col xclbins</p>
+    </div>
+    <span class="arrow">›</span>
+  </a>
+
+  <a class="entry" href="phase5.html">
+    <div class="phase-badge">5</div>
+    <div class="entry-body">
+      <h2>Phase 5 — Long Context &amp; 1-Column NPU</h2>
+      <p>8k context validated · NPU 2–3× over CPU · attention fallback characterised</p>
+    </div>
+    <span class="arrow">›</span>
+  </a>
+
+  <a class="entry" href="phase4.html">
+    <div class="phase-badge">4</div>
+    <div class="entry-body">
+      <h2>Phase 4 — Power Measurement &amp; Workload Isolation</h2>
+      <p>NPU on dedicated XDNA2 silicon · bench-power.sh · J/tok baseline</p>
+    </div>
+    <span class="arrow">›</span>
+  </a>
+
+  <a class="entry" href="phase3.html">
+    <div class="phase-badge">3</div>
+    <div class="entry-body">
+      <h2>Phase 3 — 8B Model Support (4 K-Slots)</h2>
+      <p>K=4096 and K=14336 · Llama 3.1 8B fully covered · tile-loop optimisation</p>
+    </div>
+    <span class="arrow">›</span>
+  </a>
+
+  <a class="entry" href="phase2.html">
+    <div class="phase-badge">2</div>
+    <div class="entry-body">
+      <h2>Phase 2 — Dual-Slot Dispatch</h2>
+      <p>K=5632 FFN layers on NPU · multi-slot architecture (up to 8 slots)</p>
+    </div>
+    <span class="arrow">›</span>
+  </a>
+
+  <a class="entry" href="phase1.html">
+    <div class="phase-badge">1</div>
+    <div class="entry-body">
+      <h2>Phase 1 — NPU Baseline</h2>
+      <p>First working XDNA2 backend · weight cache · K=2048 · TinyLlama 1.1B</p>
+    </div>
+    <span class="arrow">›</span>
+  </a>
+
   <footer>
     Built with <a href="https://claude.ai/code">Claude Code</a> ·
     <a href="https://github.com/BrandedTamarasu-glitch/OllamaAMDNPU">GitHub repo</a>
   </footer>
-
 </div>
 </body>
 </html>

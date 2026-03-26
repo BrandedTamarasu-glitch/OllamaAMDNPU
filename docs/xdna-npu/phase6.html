@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Phase 6 — AMD XDNA2 NPU Backend</title>
+  <style>
+    :root { --bg: #0d1117; --surface: #161b22; --border: #30363d; --text: #e6edf3; --muted: #8b949e; --green: #3fb950; --green-dim: #1a3a22; --blue: #58a6ff; --yellow: #d29922; --yellow-dim: #2e2208; --tag-bg: #1f2937; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; padding: 2rem 1rem; }
+    .container { max-width: 860px; margin: 0 auto; }
+    header { border-bottom: 1px solid var(--border); padding-bottom: 1.5rem; margin-bottom: 2rem; }
+    header h1 { font-size: 1.5rem; font-weight: 700; }
+    header h1 span { color: var(--blue); }
+    header p { color: var(--muted); margin-top: 0.4rem; font-size: 0.88rem; }
+    header a { color: var(--blue); text-decoration: none; }
+    .win-box { background: var(--green-dim); border: 1px solid var(--green); border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 1.25rem; }
+    .win-label { font-size: 0.72rem; font-weight: 700; color: var(--green); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.35rem; }
+    .wins { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .win-stat { background: rgba(63,185,80,0.1); border: 1px solid rgba(63,185,80,0.25); border-radius: 4px; padding: 0.25rem 0.6rem; font-size: 0.85rem; color: var(--green); font-weight: 600; }
+    .note-box { background: var(--yellow-dim); border: 1px solid var(--yellow); border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 1.25rem; }
+    .note-label { font-size: 0.72rem; font-weight: 700; color: var(--yellow); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.35rem; }
+    .note-box p { font-size: 0.85rem; color: var(--yellow); }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.1rem 1.25rem; margin-bottom: 1rem; }
+    .card h2 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.6rem; }
+    .card p { font-size: 0.87rem; color: var(--muted); margin-bottom: 0.4rem; }
+    .card p:last-child { margin-bottom: 0; }
+    .card p strong { color: var(--text); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.83rem; margin-top: 0.5rem; }
+    th { text-align: left; color: var(--muted); font-weight: 600; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
+    td { padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); color: var(--text); }
+    tr:last-child td { border-bottom: none; }
+    td.highlight { color: var(--green); font-weight: 600; }
+    td.muted { color: var(--muted); }
+    td.warn { color: var(--yellow); }
+    code { font-family: "SF Mono", Consolas, monospace; font-size: 0.82em; background: var(--tag-bg); padding: 0.1em 0.35em; border-radius: 3px; }
+    footer { border-top: 1px solid var(--border); padding-top: 1.25rem; margin-top: 2rem; font-size: 0.8rem; color: var(--muted); }
+    footer a { color: var(--blue); text-decoration: none; }
+    .nav { display: flex; justify-content: space-between; margin-top: 1.5rem; }
+    .nav a { color: var(--blue); text-decoration: none; font-size: 0.85rem; padding: 0.3rem 0.7rem; border: 1px solid var(--border); border-radius: 6px; }
+    .nav a:hover { border-color: var(--blue); }
+  </style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Phase 6 — <span>Multi-Core NPU (4-Column)</span></h1>
+    <p>4× AIE column parallelism · TILE_N=256 · all 4 K-slots upgraded &nbsp;·&nbsp; <a href="index.html">← All changelogs</a></p>
+  </header>
+
+  <div class="win-box">
+    <div class="win-label">Wins</div>
+    <div class="wins">
+      <span class="win-stat">pp2048: 19.5 t/s (+51% vs Phase 5)</span>
+      <span class="win-stat">pp512: 13.7 t/s (+34% vs Phase 5)</span>
+      <span class="win-stat">pp4096: 16.2 t/s (+38% vs Phase 5)</span>
+      <span class="win-stat">All 4 K-slots on 4-col xclbins</span>
+    </div>
+  </div>
+
+  <div class="note-box">
+    <div class="note-label">Power trade-off</div>
+    <p>4-col NPU draws 58.5 W avg (vs 45.8 W Phase 5) — all 4 AIE columns active during prefill. Decode remains CPU-only, so NPU idles at elevated power during generation.</p>
+  </div>
+
+  <div class="card">
+    <h2>What was built</h2>
+    <p>Rebuilt all 4 xclbin slots (K=2048, 4096, 5632, 14336) with <strong><code>n_aie_cols=4</code></strong>, dispatching each matrix tile across 4 AIE columns simultaneously instead of 1. Each column handles a quarter of the output tile in parallel.</p>
+    <p>The mlir-aie build parameter <code>n_aie_cols=4</code> changes the generated kernel to use a 4-column AIE array partition. The host-side tile loop is unchanged — the same <code>TILE_M × TILE_K × TILE_N</code> dispatch produces 4× more compute per call.</p>
+    <p>TILE_N was increased to 256 (from 64) to better utilise the wider 4-column output width. Each dispatch now produces a 2048×TILE_N output slice.</p>
+  </div>
+
+  <div class="card">
+    <h2>Column resource constraint (discovered)</h2>
+    <p>The NPU5 (Strix Halo) has <strong>16 AIE columns</strong> and a driver-enforced <code>hwctx_limit=16</code>. Each 4-col xclbin occupies 4 columns, so a maximum of <strong>4 simultaneous hw_contexts</strong> can be loaded (4 × 4 = 16 columns).</p>
+    <p>Attempting to load 8 slots (8 × 4-col = 32 columns) exceeded the physical column count — all NPU dispatches silently fell through to CPU. This set the 4-slot ceiling for all subsequent phases.</p>
+  </div>
+
+  <div class="card">
+    <h2>Performance vs Phase 5 (Llama 3.1 8B Q4_K_M)</h2>
+    <table>
+      <tr><th>Test</th><th>Phase 5 (1-col)</th><th>Phase 6 (4-col)</th><th>Gain</th></tr>
+      <tr><td>pp=512</td><td class="muted">10.2 t/s</td><td class="highlight">13.7 t/s</td><td class="highlight">+34%</td></tr>
+      <tr><td>pp=2048</td><td class="muted">12.9 t/s</td><td class="highlight">19.5 t/s</td><td class="highlight">+51%</td></tr>
+      <tr><td>pp=4096</td><td class="muted">11.7 t/s</td><td class="highlight">16.2 t/s</td><td class="highlight">+38%</td></tr>
+      <tr><td>pp=8192</td><td class="muted">8.9 t/s</td><td class="highlight">10.9 t/s</td><td class="highlight">+22%</td></tr>
+      <tr><td>Decode tg20</td><td class="muted">~4.1 t/s (CPU)</td><td class="muted">~3.76 t/s (CPU)</td><td class="muted">—</td></tr>
+    </table>
+    <p style="margin-top:0.6rem;">Peak gain at pp=2048 where the wider TILE_N=256 is fully saturated. Longer contexts see smaller gains as CPU attention dominates.</p>
+  </div>
+
+  <div class="card">
+    <h2>.zshrc configuration (Phase 6)</h2>
+    <p><code>GGML_XDNA_MIN_N=2</code> — excludes single-token decode (M=1) from NPU to avoid overhead at batch size 1.</p>
+    <p><code>GGML_XDNA_TILE_N=256</code> (slots 1–4) — wider output tile for better 4-col utilisation.</p>
+    <p>All 4 xclbins point at <code>~/xclbin-4col/</code> (TILE_N=256, n_aie_cols=4 builds).</p>
+  </div>
+
+  <div class="nav">
+    <a href="phase5.html">← Phase 5</a>
+    <a href="phase7.html">Phase 7 →</a>
+  </div>
+
+  <footer>
+    AMD XDNA2 NPU Backend · <a href="https://github.com/BrandedTamarasu-glitch/OllamaAMDNPU">GitHub</a> ·
+    Built with <a href="https://claude.ai/code">Claude Code</a>
+  </footer>
+</div>
+</body>
+</html>

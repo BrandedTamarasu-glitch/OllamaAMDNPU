@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Phase 2 — AMD XDNA2 NPU Backend</title>
+  <style>
+    :root { --bg: #0d1117; --surface: #161b22; --border: #30363d; --text: #e6edf3; --muted: #8b949e; --green: #3fb950; --green-dim: #1a3a22; --blue: #58a6ff; --tag-bg: #1f2937; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; padding: 2rem 1rem; }
+    .container { max-width: 860px; margin: 0 auto; }
+    header { border-bottom: 1px solid var(--border); padding-bottom: 1.5rem; margin-bottom: 2rem; }
+    header h1 { font-size: 1.5rem; font-weight: 700; }
+    header h1 span { color: var(--blue); }
+    header p { color: var(--muted); margin-top: 0.4rem; font-size: 0.88rem; }
+    header a { color: var(--blue); text-decoration: none; }
+    .win-box { background: var(--green-dim); border: 1px solid var(--green); border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 1.25rem; }
+    .win-label { font-size: 0.72rem; font-weight: 700; color: var(--green); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.35rem; }
+    .wins { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .win-stat { background: rgba(63,185,80,0.1); border: 1px solid rgba(63,185,80,0.25); border-radius: 4px; padding: 0.25rem 0.6rem; font-size: 0.85rem; color: var(--green); font-weight: 600; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.1rem 1.25rem; margin-bottom: 1rem; }
+    .card h2 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.6rem; }
+    .card p { font-size: 0.87rem; color: var(--muted); margin-bottom: 0.4rem; }
+    .card p:last-child { margin-bottom: 0; }
+    .card p strong { color: var(--text); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.83rem; margin-top: 0.5rem; }
+    th { text-align: left; color: var(--muted); font-weight: 600; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
+    td { padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); color: var(--text); }
+    tr:last-child td { border-bottom: none; }
+    td.highlight { color: var(--green); font-weight: 600; }
+    td.muted { color: var(--muted); }
+    code { font-family: "SF Mono", Consolas, monospace; font-size: 0.82em; background: var(--tag-bg); padding: 0.1em 0.35em; border-radius: 3px; }
+    footer { border-top: 1px solid var(--border); padding-top: 1.25rem; margin-top: 2rem; font-size: 0.8rem; color: var(--muted); }
+    footer a { color: var(--blue); text-decoration: none; }
+    .nav { display: flex; justify-content: space-between; margin-top: 1.5rem; }
+    .nav a { color: var(--blue); text-decoration: none; font-size: 0.85rem; padding: 0.3rem 0.7rem; border: 1px solid var(--border); border-radius: 6px; }
+    .nav a:hover { border-color: var(--blue); }
+  </style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Phase 2 — <span>Dual-Slot Dispatch</span></h1>
+    <p>Second xclbin slot for K=5632 FFN layers &nbsp;·&nbsp; <a href="index.html">← All changelogs</a></p>
+  </header>
+
+  <div class="win-box">
+    <div class="win-label">Wins</div>
+    <div class="wins">
+      <span class="win-stat">K=5632 FFN layers now on NPU</span>
+      <span class="win-stat">Multi-slot architecture (up to 8)</span>
+      <span class="win-stat">Auto-selection by K dimension</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>What was built</h2>
+    <p>Extended the backend to load and manage <strong>multiple xclbin slots simultaneously</strong>. Each slot covers a different K dimension; <code>find_slot(K)</code> selects the best matching slot at dispatch time.</p>
+    <p>Added slot 2: <strong>K=5632</strong> (FFN down projection layers in TinyLlama 1.1B). Previously these fell back to CPU — now offloaded to the NPU using a separate precompiled xclbin.</p>
+    <p>The slot system was designed to scale to 8 simultaneous xclbins, each covering a different matrix shape. Slots are loaded at startup from <code>GGML_XDNA_XCLBIN_PATH_2</code> through <code>_8</code> environment variables.</p>
+  </div>
+
+  <div class="card">
+    <h2>Slot selection logic</h2>
+    <p><code>find_slot(K, N)</code> scans loaded slots for an exact K match, then picks the slot with the largest <code>tile_n ≤ N</code> (best fit without overflow). Falls back to the smallest <code>tile_n > N</code> if no exact-fit slot exists — the tiling loop handles partial last tiles by zero-padding.</p>
+    <p>If no slot matches the K dimension, <code>supports_op()</code> returns false and the op falls back to the next registered backend (CPU or Vulkan).</p>
+  </div>
+
+  <div class="card">
+    <h2>Layer coverage after Phase 2 (TinyLlama 1.1B)</h2>
+    <table>
+      <tr><th>Layer type</th><th>K dim</th><th>Phase 1</th><th>Phase 2</th></tr>
+      <tr><td>Attention QKV projections</td><td>K=2048</td><td class="highlight">NPU ✓</td><td class="highlight">NPU ✓</td></tr>
+      <tr><td>Attention output projection</td><td>K=2048</td><td class="highlight">NPU ✓</td><td class="highlight">NPU ✓</td></tr>
+      <tr><td>FFN gate / up projections</td><td>K=2048</td><td class="highlight">NPU ✓</td><td class="highlight">NPU ✓</td></tr>
+      <tr><td>FFN down projection</td><td>K=5632</td><td class="muted">CPU fallback</td><td class="highlight">NPU ✓</td></tr>
+    </table>
+  </div>
+
+  <div class="nav">
+    <a href="phase1.html">← Phase 1</a>
+    <a href="phase3.html">Phase 3 →</a>
+  </div>
+
+  <footer>
+    AMD XDNA2 NPU Backend · <a href="https://github.com/BrandedTamarasu-glitch/OllamaAMDNPU">GitHub</a> ·
+    Built with <a href="https://claude.ai/code">Claude Code</a>
+  </footer>
+</div>
+</body>
+</html>

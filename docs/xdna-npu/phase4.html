@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Phase 4 — AMD XDNA2 NPU Backend</title>
+  <style>
+    :root { --bg: #0d1117; --surface: #161b22; --border: #30363d; --text: #e6edf3; --muted: #8b949e; --green: #3fb950; --green-dim: #1a3a22; --blue: #58a6ff; --yellow: #d29922; --yellow-dim: #2e2208; --tag-bg: #1f2937; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; padding: 2rem 1rem; }
+    .container { max-width: 860px; margin: 0 auto; }
+    header { border-bottom: 1px solid var(--border); padding-bottom: 1.5rem; margin-bottom: 2rem; }
+    header h1 { font-size: 1.5rem; font-weight: 700; }
+    header h1 span { color: var(--blue); }
+    header p { color: var(--muted); margin-top: 0.4rem; font-size: 0.88rem; }
+    header a { color: var(--blue); text-decoration: none; }
+    .win-box { background: var(--green-dim); border: 1px solid var(--green); border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 1.25rem; }
+    .win-label { font-size: 0.72rem; font-weight: 700; color: var(--green); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.35rem; }
+    .wins { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .win-stat { background: rgba(63,185,80,0.1); border: 1px solid rgba(63,185,80,0.25); border-radius: 4px; padding: 0.25rem 0.6rem; font-size: 0.85rem; color: var(--green); font-weight: 600; }
+    .note-box { background: var(--yellow-dim); border: 1px solid var(--yellow); border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 1.25rem; }
+    .note-label { font-size: 0.72rem; font-weight: 700; color: var(--yellow); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.35rem; }
+    .note-box p { font-size: 0.85rem; color: var(--yellow); }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.1rem 1.25rem; margin-bottom: 1rem; }
+    .card h2 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.6rem; }
+    .card p { font-size: 0.87rem; color: var(--muted); margin-bottom: 0.4rem; }
+    .card p:last-child { margin-bottom: 0; }
+    .card p strong { color: var(--text); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.83rem; margin-top: 0.5rem; }
+    th { text-align: left; color: var(--muted); font-weight: 600; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
+    td { padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); color: var(--text); }
+    tr:last-child td { border-bottom: none; }
+    td.highlight { color: var(--green); font-weight: 600; }
+    td.muted { color: var(--muted); }
+    td.warn { color: var(--yellow); }
+    code { font-family: "SF Mono", Consolas, monospace; font-size: 0.82em; background: var(--tag-bg); padding: 0.1em 0.35em; border-radius: 3px; }
+    footer { border-top: 1px solid var(--border); padding-top: 1.25rem; margin-top: 2rem; font-size: 0.8rem; color: var(--muted); }
+    footer a { color: var(--blue); text-decoration: none; }
+    .nav { display: flex; justify-content: space-between; margin-top: 1.5rem; }
+    .nav a { color: var(--blue); text-decoration: none; font-size: 0.85rem; padding: 0.3rem 0.7rem; border: 1px solid var(--border); border-radius: 6px; }
+    .nav a:hover { border-color: var(--blue); }
+  </style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Phase 4 — <span>Power Measurement &amp; Workload Isolation</span></h1>
+    <p>NPU vs Vulkan characterisation · bench-power.sh · J/tok baseline &nbsp;·&nbsp; <a href="index.html">← All changelogs</a></p>
+  </header>
+
+  <div class="win-box">
+    <div class="win-label">Wins</div>
+    <div class="wins">
+      <span class="win-stat">NPU confirmed on dedicated XDNA2 silicon</span>
+      <span class="win-stat">No GPU contention — NPU runs alongside iGPU</span>
+      <span class="win-stat">Power baseline established for all phases</span>
+      <span class="win-stat">bench-power.sh tooling</span>
+    </div>
+  </div>
+
+  <div class="note-box">
+    <div class="note-label">Finding</div>
+    <p>Vulkan is 12× more energy-efficient per token (1.3 J/tok vs 16.2 J/tok) due to much higher decode throughput. NPU's advantage is workload isolation — it runs on dedicated XDNA2 silicon with no iGPU contention.</p>
+  </div>
+
+  <div class="card">
+    <h2>What was built</h2>
+    <p>Added <code>tools/bench-power.sh</code> — a script that captures SoC Package Power Tracking (PPT) via <code>ryzenadj</code> while running <code>llama-bench</code>. Samples wattage at 1 Hz and reports average power, peak power, and joules-per-token.</p>
+    <p>Ran a systematic comparison between NPU (Phase 3/4-col) and Vulkan iGPU across prefill and decode workloads to characterise the efficiency trade-off.</p>
+  </div>
+
+  <div class="card">
+    <h2>Power measurements (Ryzen AI MAX 385)</h2>
+    <table>
+      <tr><th>Backend</th><th>Prefill</th><th>Decode</th><th>Avg Power</th><th>J/tok (decode)</th></tr>
+      <tr><td>NPU 4-col (Phase 6)</td><td>32.7 t/s</td><td>3.6 t/s</td><td class="warn">58.5 W</td><td class="warn">16.2 J/tok</td></tr>
+      <tr><td>Vulkan iGPU</td><td>632 t/s</td><td>41.6 t/s</td><td>52.2 W</td><td class="highlight">1.3 J/tok</td></tr>
+    </table>
+    <p style="margin-top:0.6rem;">NPU draws <em>more</em> power than Vulkan despite lower throughput — all 4 AIE columns active during prefill; NPU idles at high power during CPU decode.</p>
+  </div>
+
+  <div class="card">
+    <h2>Workload isolation — the NPU advantage</h2>
+    <p>The XDNA2 NPU runs on <strong>dedicated silicon</strong> with its own memory, power rails, and compute units. It does not share resources with the Radeon 8050S iGPU.</p>
+    <p>This means: <strong>NPU inference + iGPU gaming/rendering can run simultaneously</strong> with no contention. If the iGPU is busy, NPU is the correct backend.</p>
+    <p>Confirmed by running a GPU stress test alongside NPU inference: no throughput degradation observed on either workload.</p>
+  </div>
+
+  <div class="card">
+    <h2>When to use each backend</h2>
+    <p><strong>Use Vulkan</strong> when the iGPU is idle and you want maximum throughput or minimum J/tok.</p>
+    <p><strong>Use NPU</strong> when the iGPU is occupied (gaming, rendering, GPU compute) — NPU inference runs fully independently with no GPU contention.</p>
+  </div>
+
+  <div class="nav">
+    <a href="phase3.html">← Phase 3</a>
+    <a href="phase5.html">Phase 5 →</a>
+  </div>
+
+  <footer>
+    AMD XDNA2 NPU Backend · <a href="https://github.com/BrandedTamarasu-glitch/OllamaAMDNPU">GitHub</a> ·
+    Built with <a href="https://claude.ai/code">Claude Code</a>
+  </footer>
+</div>
+</body>
+</html>

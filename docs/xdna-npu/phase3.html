@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Phase 3 — AMD XDNA2 NPU Backend</title>
+  <style>
+    :root { --bg: #0d1117; --surface: #161b22; --border: #30363d; --text: #e6edf3; --muted: #8b949e; --green: #3fb950; --green-dim: #1a3a22; --blue: #58a6ff; --tag-bg: #1f2937; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; padding: 2rem 1rem; }
+    .container { max-width: 860px; margin: 0 auto; }
+    header { border-bottom: 1px solid var(--border); padding-bottom: 1.5rem; margin-bottom: 2rem; }
+    header h1 { font-size: 1.5rem; font-weight: 700; }
+    header h1 span { color: var(--blue); }
+    header p { color: var(--muted); margin-top: 0.4rem; font-size: 0.88rem; }
+    header a { color: var(--blue); text-decoration: none; }
+    .win-box { background: var(--green-dim); border: 1px solid var(--green); border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 1.25rem; }
+    .win-label { font-size: 0.72rem; font-weight: 700; color: var(--green); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.35rem; }
+    .wins { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .win-stat { background: rgba(63,185,80,0.1); border: 1px solid rgba(63,185,80,0.25); border-radius: 4px; padding: 0.25rem 0.6rem; font-size: 0.85rem; color: var(--green); font-weight: 600; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.1rem 1.25rem; margin-bottom: 1rem; }
+    .card h2 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.6rem; }
+    .card p { font-size: 0.87rem; color: var(--muted); margin-bottom: 0.4rem; }
+    .card p:last-child { margin-bottom: 0; }
+    .card p strong { color: var(--text); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.83rem; margin-top: 0.5rem; }
+    th { text-align: left; color: var(--muted); font-weight: 600; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
+    td { padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); color: var(--text); }
+    tr:last-child td { border-bottom: none; }
+    td.highlight { color: var(--green); font-weight: 600; }
+    td.muted { color: var(--muted); }
+    code { font-family: "SF Mono", Consolas, monospace; font-size: 0.82em; background: var(--tag-bg); padding: 0.1em 0.35em; border-radius: 3px; }
+    footer { border-top: 1px solid var(--border); padding-top: 1.25rem; margin-top: 2rem; font-size: 0.8rem; color: var(--muted); }
+    footer a { color: var(--blue); text-decoration: none; }
+    .nav { display: flex; justify-content: space-between; margin-top: 1.5rem; }
+    .nav a { color: var(--blue); text-decoration: none; font-size: 0.85rem; padding: 0.3rem 0.7rem; border: 1px solid var(--border); border-radius: 6px; }
+    .nav a:hover { border-color: var(--blue); }
+  </style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Phase 3 — <span>8B Model Support</span></h1>
+    <p>K=4096 and K=14336 slots · tile-loop optimisation · Llama 3.1 8B &nbsp;·&nbsp; <a href="index.html">← All changelogs</a></p>
+  </header>
+
+  <div class="win-box">
+    <div class="win-label">Wins</div>
+    <div class="wins">
+      <span class="win-stat">Llama 3.1 8B fully covered (4 K-slots)</span>
+      <span class="win-stat">+15–28% prefill vs CPU baseline</span>
+      <span class="win-stat">Tile-loop optimised — reduced host overhead</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>What was built</h2>
+    <p>Scaled from TinyLlama (K=2048, K=5632) to <strong>Llama 3.1 8B</strong> by adding two new xclbin slots covering the remaining dominant K dimensions:</p>
+    <p><strong>K=4096</strong> — attention QKV + output projections and FFN gate/up layers in Llama 3.1 8B (hidden dim = 4096).</p>
+    <p><strong>K=14336</strong> — FFN down projection in Llama 3.1 8B (intermediate dim = 14336). The largest and most compute-intensive layer; NPU offload gives the biggest absolute speedup here.</p>
+    <p>With all 4 slots loaded, every MUL_MAT with a fixed K in Llama 3.1 8B offloads to the NPU. Only attention score matmuls (K=variable, K=seq_len) remain on CPU.</p>
+  </div>
+
+  <div class="card">
+    <h2>Tile-loop optimisation</h2>
+    <p>Reduced per-tile dispatch overhead by pre-allocating all XRT buffer objects at slot init time rather than per-call. Reuses context-resident tile buffers (<code>tile_a</code>, <code>tile_b</code>, <code>tile_c</code>) across calls to avoid heap churn.</p>
+    <p>Zero-fill of partial last tiles is now conditional: full tiles skip the <code>memset</code>, reducing host-side work for common even-multiple shapes.</p>
+  </div>
+
+  <div class="card">
+    <h2>Layer coverage — Llama 3.1 8B</h2>
+    <table>
+      <tr><th>Layer type</th><th>K dim</th><th>Coverage</th></tr>
+      <tr><td>Attention Q, K, V projections</td><td>K=4096</td><td class="highlight">NPU ✓</td></tr>
+      <tr><td>Attention output projection</td><td>K=4096</td><td class="highlight">NPU ✓</td></tr>
+      <tr><td>FFN gate projection</td><td>K=4096</td><td class="highlight">NPU ✓</td></tr>
+      <tr><td>FFN up projection</td><td>K=4096</td><td class="highlight">NPU ✓</td></tr>
+      <tr><td>FFN down projection</td><td>K=14336</td><td class="highlight">NPU ✓</td></tr>
+      <tr><td>Attention score matmuls</td><td>K=seq_len (variable)</td><td class="muted">CPU (variable K)</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Performance (Llama 3.1 8B Q4_K_M, 1-col NPU)</h2>
+    <table>
+      <tr><th>Backend</th><th>pp=512</th><th>pp=2048</th><th>pp=4096</th><th>pp=8192</th></tr>
+      <tr><td>CPU only</td><td class="muted">4.6 t/s</td><td class="muted">4.3 t/s</td><td class="muted">4.0 t/s</td><td class="muted">3.6 t/s</td></tr>
+      <tr><td><strong>NPU Phase 3</strong></td><td class="highlight">~6 t/s</td><td class="highlight">~8 t/s</td><td class="highlight">~7 t/s</td><td class="highlight">~5 t/s</td></tr>
+    </table>
+    <p style="margin-top:0.6rem;">+15–28% prefill vs CPU; performance scales with pp up to ~2048 where tile utilisation peaks.</p>
+  </div>
+
+  <div class="nav">
+    <a href="phase2.html">← Phase 2</a>
+    <a href="phase4.html">Phase 4 →</a>
+  </div>
+
+  <footer>
+    AMD XDNA2 NPU Backend · <a href="https://github.com/BrandedTamarasu-glitch/OllamaAMDNPU">GitHub</a> ·
+    Built with <a href="https://claude.ai/code">Claude Code</a>
+  </footer>
+</div>
+</body>
+</html>

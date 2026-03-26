@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Phase 1 — AMD XDNA2 NPU Backend</title>
+  <style>
+    :root {
+      --bg: #0d1117; --surface: #161b22; --border: #30363d;
+      --text: #e6edf3; --muted: #8b949e; --green: #3fb950;
+      --green-dim: #1a3a22; --blue: #58a6ff; --tag-bg: #1f2937;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; padding: 2rem 1rem; }
+    .container { max-width: 860px; margin: 0 auto; }
+    header { border-bottom: 1px solid var(--border); padding-bottom: 1.5rem; margin-bottom: 2rem; }
+    header h1 { font-size: 1.5rem; font-weight: 700; }
+    header h1 span { color: var(--blue); }
+    header p { color: var(--muted); margin-top: 0.4rem; font-size: 0.88rem; }
+    header a { color: var(--blue); text-decoration: none; }
+    header a:hover { text-decoration: underline; }
+    .breadcrumb { font-size: 0.82rem; color: var(--muted); margin-bottom: 1.25rem; }
+    .breadcrumb a { color: var(--blue); text-decoration: none; }
+    .win-box { background: var(--green-dim); border: 1px solid var(--green); border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 1.25rem; }
+    .win-label { font-size: 0.72rem; font-weight: 700; color: var(--green); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.35rem; }
+    .wins { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .win-stat { background: rgba(63,185,80,0.1); border: 1px solid rgba(63,185,80,0.25); border-radius: 4px; padding: 0.25rem 0.6rem; font-size: 0.85rem; color: var(--green); font-weight: 600; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.1rem 1.25rem; margin-bottom: 1rem; }
+    .card h2 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.6rem; color: var(--text); }
+    .card p { font-size: 0.87rem; color: var(--muted); margin-bottom: 0.4rem; }
+    .card p:last-child { margin-bottom: 0; }
+    .card p strong { color: var(--text); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.83rem; margin-top: 0.5rem; }
+    th { text-align: left; color: var(--muted); font-weight: 600; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
+    td { padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); color: var(--text); }
+    tr:last-child td { border-bottom: none; }
+    td.highlight { color: var(--green); font-weight: 600; }
+    td.muted { color: var(--muted); }
+    code { font-family: "SF Mono", Consolas, monospace; font-size: 0.82em; background: var(--tag-bg); padding: 0.1em 0.35em; border-radius: 3px; }
+    .tag { display: inline-block; background: var(--tag-bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.1rem 0.4rem; font-size: 0.76rem; color: var(--muted); font-family: "SF Mono", Consolas, monospace; }
+    footer { border-top: 1px solid var(--border); padding-top: 1.25rem; margin-top: 2rem; font-size: 0.8rem; color: var(--muted); }
+    footer a { color: var(--blue); text-decoration: none; }
+    .nav { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1.5rem; }
+    .nav a { color: var(--blue); text-decoration: none; font-size: 0.85rem; padding: 0.3rem 0.7rem; border: 1px solid var(--border); border-radius: 6px; }
+    .nav a:hover { border-color: var(--blue); }
+  </style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Phase 1 — <span>NPU Baseline</span></h1>
+    <p>First working XDNA2 backend for llama.cpp &nbsp;·&nbsp; <a href="index.html">← All changelogs</a></p>
+  </header>
+
+  <div class="win-box">
+    <div class="win-label">Wins</div>
+    <div class="wins">
+      <span class="win-stat">XDNA2 backend operational</span>
+      <span class="win-stat">NPU faster than CPU for prefill</span>
+      <span class="win-stat">Weight cache eliminates re-quantisation</span>
+      <span class="win-stat">TinyLlama 1.1B validated</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>What was built</h2>
+    <p>A custom <strong>ggml backend</strong> that intercepts <code>GGML_OP_MUL_MAT</code> and dispatches it to the AMD XDNA2 NPU via XRT kernel dispatch. All other operations fall back to the CPU backend automatically via <code>supports_op()</code> returning false.</p>
+    <p>The backend implements the full ggml backend interface: buffer allocation, tensor quantisation, and asynchronous kernel dispatch with a fixed tile size (<code>TILE_M × TILE_K × TILE_N</code>). Larger matrices are tiled at the host level and dispatched as sequential tile calls.</p>
+    <p><strong>Weight cache:</strong> model weights (static per layer) are quantised to int8 with per-row scales on first use and stored in a pinned XRT buffer. Subsequent tokens reuse the cached result — eliminating the dominant re-quantisation overhead.</p>
+    <p><strong>Activation quantisation:</strong> activations change every token, so they are quantised per-call. Per-row int8 with a float32 scale per row.</p>
+  </div>
+
+  <div class="card">
+    <h2>Architecture</h2>
+    <p><strong>Kernel:</strong> built with mlir-aie <code>matrix_multiplication</code> single-core example. Compiled xclbin encodes a fixed <code>TILE_M × TILE_K × TILE_N</code> shape.</p>
+    <p><strong>XRT dispatch:</strong> one <code>xrt::hw_context</code> per xclbin slot. Activations and weights are DMA'd into XRT buffer objects (<code>bo_a</code>, <code>bo_b</code>) and the kernel writes to <code>bo_c</code>.</p>
+    <p><strong>K=2048 coverage:</strong> attention projection layers in TinyLlama 1.1B. FFN down layers (K=5632) fall back to CPU at this phase.</p>
+  </div>
+
+  <div class="card">
+    <h2>Performance (TinyLlama 1.1B)</h2>
+    <table>
+      <tr><th>Backend</th><th>Prefill pp512</th><th>Decode</th></tr>
+      <tr><td>CPU only</td><td class="muted">~15 t/s</td><td class="muted">~12 t/s</td></tr>
+      <tr><td><strong>NPU 1-slot (Phase 1)</strong></td><td class="highlight">~22 t/s</td><td class="muted">~12 t/s</td></tr>
+    </table>
+    <p style="margin-top:0.6rem;">Decode unchanged — NPU covers MUL_MAT prefill only; decode (M=1) uses the same xclbin path but the tile overhead dominates at batch size 1.</p>
+  </div>
+
+  <div class="card">
+    <h2>Key files introduced</h2>
+    <p><code>ggml/src/ggml-xdna/ggml-xdna.cpp</code> — full backend implementation</p>
+    <p><code>ggml/src/ggml-xdna/ggml-xdna-quant.h</code> — int8 quantisation helpers</p>
+    <p><code>ggml/src/ggml-xdna/CMakeLists.txt</code> — build integration</p>
+  </div>
+
+  <div class="nav">
+    <a href="phase2.html">Phase 2 →</a>
+  </div>
+
+  <footer>
+    AMD XDNA2 NPU Backend · <a href="https://github.com/BrandedTamarasu-glitch/OllamaAMDNPU">GitHub</a> ·
+    Built with <a href="https://claude.ai/code">Claude Code</a>
+  </footer>
+</div>
+</body>
+</html>
