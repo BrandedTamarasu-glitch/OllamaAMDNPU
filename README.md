@@ -234,18 +234,22 @@ Notes:
 
 ### Power (SoC PPT, measured via `tools/bench-power.sh`)
 
-| Backend | Avg power | J/token (decode) | Notes |
-|---------|-----------|------------------|-------|
-| NPU | 45.8 W | 11.2 J/tok | Dedicated XDNA2 silicon — does not contend with iGPU |
-| Vulkan | 67.9 W | 1.6 J/tok | 7× better efficiency/token due to much higher decode speed |
+| Backend | Prefill | Decode | Avg power | J/token (decode) |
+|---------|---------|--------|-----------|-----------------|
+| NPU 4-col (Phase 6) | 32.7 t/s | 3.6 t/s | 58.5 W | 16.2 J/tok |
+| Vulkan | 632 t/s | 41.6 t/s | 52.2 W | 1.3 J/tok |
+
+Notes:
+- **4-col NPU draws more power** than Phase 5 1-col (58.5 W vs 45.8 W) — all 4 AIE columns active
+- **Decode does not use the NPU** (M=1 per token, no xclbin covers it) — higher idle NPU power worsens J/tok vs Phase 5
+- **Vulkan is 12× more energy-efficient per token** due to much higher decode speed
 
 ### When to use NPU vs Vulkan
 
-**Use Vulkan** when the GPU is idle and you want maximum throughput (40–200× faster prefill).
+**Use Vulkan** when the GPU is idle and you want maximum throughput.
 
 **Use NPU** when:
 - The iGPU is busy (gaming, rendering, GPU compute) — NPU runs on dedicated XDNA2 silicon with no GPU contention
-- Thermal/noise matters — NPU draws ~22W less SoC power, keeping fans quieter during long sessions
 - Running inference in the background alongside GPU workloads
 
 ---
