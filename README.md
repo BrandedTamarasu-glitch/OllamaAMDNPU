@@ -244,11 +244,13 @@ Notes:
 |---------|---------|--------|-----------|-----------------|
 | NPU 4-col (Phase 6) | 32.7 t/s | 3.6 t/s | 58.5 W | 16.2 J/tok |
 | Vulkan | 632 t/s | 41.6 t/s | 52.2 W | 1.3 J/tok |
+| **Phase 7 (NPU decode + Vulkan prefill)** | **930 t/s** | **43.84 t/s** | **41.51 W** | **0.947 J/tok** |
 
 Notes:
+- **Phase 7 beats Vulkan** on both decode speed (43.84 vs 41.6 t/s) and energy efficiency (0.947 vs 1.3 J/tok) — dedicated XDNA2 silicon draws less power than the iGPU at decode
+- **Phase 7 vs Phase 6 decode**: 43.84 t/s vs 3.76 t/s (+11.7×), 0.947 vs 16.2 J/tok (−94%)
 - **4-col NPU draws more power** than Phase 5 1-col (58.5 W vs 45.8 W) — all 4 AIE columns active
-- **Decode does not use the NPU** (M=1 per token, no xclbin covers it) — higher idle NPU power worsens J/tok vs Phase 5
-- **Vulkan is 12× more energy-efficient per token** due to much higher decode speed
+- **Decode does not use the NPU in Phase 6** (M=1 per token, no xclbin covers it) — higher idle NPU power worsens J/tok vs Phase 5
 
 ### When to use NPU vs Vulkan
 

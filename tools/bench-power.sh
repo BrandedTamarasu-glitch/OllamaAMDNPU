@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # bench-power.sh — measure average SoC power (PPT) during llama-bench inference
-# Usage: bench-power.sh --npu|--vulkan
+# Usage: bench-power.sh --npu|--vulkan|--phase7
 #
-# NPU mode:    hides libggml-vulkan.so; uses GGML_BACKEND_PATH for XDNA.
-# Vulkan mode: hides libggml-xdna.so; sets GGML_BACKEND_PATH to Vulkan .so.
+# NPU mode:     hides libggml-vulkan.so; uses GGML_BACKEND_PATH for XDNA.
+#               Measures NPU-only prefill+decode (p=PP_TOKENS, n=TG_TOKENS).
+# Vulkan mode:  hides libggml-xdna.so; sets GGML_BACKEND_PATH to Vulkan .so.
+#               Measures Vulkan-only prefill+decode.
+# Phase7 mode:  both backends active; decode-only run (p=0, n=TG_TOKENS, ub=1).
+#               Measures NPU decode power with Vulkan idle.
+#               Set GGML_XDNA_MIN_N=1 GGML_XDNA_MAX_N=1 before running.
 #
 # Uses llama-bench (stdout output) to avoid llama-cli tty-write issue.
 # Reads amdgpu PPT (hwmon3/power1_input, µW) at 200ms intervals and
@@ -25,8 +30,8 @@ if [[ ! -f "$POWER_FILE" ]]; then
 fi
 
 MODE="${1:-}"
-if [[ "$MODE" != "--npu" && "$MODE" != "--vulkan" ]]; then
-    echo "Usage: bench-power.sh --npu|--vulkan" >&2; exit 1
+if [[ "$MODE" != "--npu" && "$MODE" != "--vulkan" && "$MODE" != "--phase7" ]]; then
+    echo "Usage: bench-power.sh --npu|--vulkan|--phase7" >&2; exit 1
 fi
 
 echo "=== bench-power: ${MODE/--/} mode ==="
@@ -45,12 +50,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Isolate backends: NPU hides Vulkan; Vulkan hides XDNA
+# Isolate backends: NPU hides Vulkan; Vulkan hides XDNA; phase7 runs both
 if [[ "$MODE" == "--npu" ]]; then
     if [[ -f "$VULKAN_SO" ]]; then mv "$VULKAN_SO" "$VULKAN_SO_HIDDEN"; VULKAN_HIDDEN=1; fi
 elif [[ "$MODE" == "--vulkan" ]]; then
     if [[ -f "$XDNA_SO" ]]; then mv "$XDNA_SO" "$XDNA_SO_HIDDEN"; XDNA_HIDDEN=1; fi
 fi
+# phase7: no hiding — both backends stay active
 
 # Start power sampler
 ( while true; do cat "$POWER_FILE"; sleep 0.2; done ) > "$POWER_LOG" &
@@ -64,6 +70,13 @@ if [[ "$MODE" == "--vulkan" ]]; then
         GGML_BACKEND_PATH=$(realpath ./build/bin/libggml-vulkan.so) \
             ./build/bin/llama-bench \
             -m "$MODEL" -p "$PP_TOKENS" -n "$TG_TOKENS" -r 1 -ngl 99 2>/dev/null
+    )
+elif [[ "$MODE" == "--phase7" ]]; then
+    # Phase 7: both backends active; decode-only run at ub=1 to isolate NPU decode power.
+    # Requires MIN_N=1 MAX_N=1 in environment (set in .zshrc for Phase 7).
+    INFER_OUT=$(
+        ./build/bin/llama-bench \
+            -m "$MODEL" -p 0 -n "$TG_TOKENS" -ub 1 -r 1 2>/dev/null
     )
 else
     # NPU: GGML_BACKEND_PATH already set from caller's environment (XDNA .so).

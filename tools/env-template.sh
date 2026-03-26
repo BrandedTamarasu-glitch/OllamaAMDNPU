@@ -16,60 +16,76 @@
 #   Each "slot" is one compiled xclbin covering one K dimension. The backend picks
 #   the slot whose TILE_K matches the current matmul. Matmuls with no matching slot
 #   fall back to CPU automatically — this is expected behaviour.
+#
+# PHASE 7 MODE (NPU decode + Vulkan prefill) — RECOMMENDED:
+#   - MIN_N=1, MAX_N=1: NPU handles only N=1 (single-token decode)
+#   - All prefill ops (N>1) route to Vulkan automatically (~930 t/s pp512)
+#   - NPU decode: ~42 t/s (+11× vs CPU baseline of 3.76 t/s)
+#   - xclbins: TILE_N=64 decode kernels (n_aie_cols=4)
+#
+# PHASE 6 MODE (NPU prefill only) — NPU handles prefill, CPU handles decode:
+#   - Set MIN_N=2, MAX_N=131072 (or omit MAX_N)
+#   - Use TILE_N=256 prefill xclbins (n_aie_cols=4)
+#   - NPU prefill: ~19.5 t/s pp2048 vs ~4.3 t/s CPU
 
 # ── Build location ────────────────────────────────────────────────────────────
 # Adjust REPO to wherever you cloned OllamaAMDNPU
 REPO=~/OllamaAMDNPU
 
 # ── Backend selection ─────────────────────────────────────────────────────────
-# Points llama.cpp to the XDNA backend shared library.
-# Change to libggml-vulkan.so to use the Vulkan iGPU backend instead.
+# Points llama.cpp to the XDNA backend shared library (loaded alongside Vulkan).
 export GGML_BACKEND_PATH=$REPO/build/bin/libggml-xdna.so
 
+# ── Routing: NPU-decode-only mode (Phase 7) ───────────────────────────────────
+# MIN_N=1: include single-token decode (N=1) in NPU offload
+# MAX_N=1: cap NPU at N=1, letting Vulkan handle all larger prefill batches
+export GGML_XDNA_MIN_N=1
+export GGML_XDNA_MAX_N=1
+# To use Phase 6 NPU-prefill-only mode instead, replace the above with:
+#   export GGML_XDNA_MIN_N=2
+#   # (remove or unset GGML_XDNA_MAX_N)
+
 # ── Slot 1: K=2048 (attention Q/K/V/O projections) ───────────────────────────
-# Required. Build command:
-#   make dtype_in=i8 dtype_out=i32 AIE_TARGET=aie2p M=2048 K=2048 N=64 m=64 k=64 n=64 n_aie_cols=1
-export GGML_XDNA_XCLBIN_PATH=~/xclbin/k2048.xclbin
-export GGML_XDNA_INSTR_PATH=~/xclbin/k2048_sequence.bin
+# Required. Build command (decode xclbin, TILE_N=64, 4-col):
+#   make dtype_in=i8 dtype_out=i32 AIE_TARGET=aie2p \
+#        M=2048 K=2048 N=64 m=64 k=64 n=64 n_aie_cols=4
+export GGML_XDNA_XCLBIN_PATH=~/xclbin-decode/k2048_n64_decode.xclbin
+export GGML_XDNA_INSTR_PATH=~/xclbin-decode/k2048_n64_decode.txt
 export GGML_XDNA_TILE_M=2048
 export GGML_XDNA_TILE_K=2048
 export GGML_XDNA_TILE_N=64
 
-# ── Slot 2: K=4096 (mixed-width layers) ──────────────────────────────────────
-# Optional. Adds coverage for layers with K=4096 inner dimension.
+# ── Slot 2: K=4096 ────────────────────────────────────────────────────────────
 # Build command:
-#   make dtype_in=i8 dtype_out=i32 AIE_TARGET=aie2p M=2048 K=4096 N=64 m=64 k=64 n=64 n_aie_cols=1
-export GGML_XDNA_XCLBIN_PATH_2=~/xclbin/k4096.xclbin
-export GGML_XDNA_INSTR_PATH_2=~/xclbin/k4096_sequence.bin
+#   make dtype_in=i8 dtype_out=i32 AIE_TARGET=aie2p \
+#        M=2048 K=4096 N=64 m=64 k=64 n=64 n_aie_cols=4
+export GGML_XDNA_XCLBIN_PATH_2=~/xclbin-decode/k4096_n64_decode.xclbin
+export GGML_XDNA_INSTR_PATH_2=~/xclbin-decode/k4096_n64_decode.txt
 export GGML_XDNA_TILE_M2=2048
 export GGML_XDNA_TILE_K2=4096
 export GGML_XDNA_TILE_N2=64
 
-# ── Slot 3: K=5632 (FFN down projections, LLaMA-3 8B) ───────────────────────
-# Optional but recommended for LLaMA-3 8B — covers ~20% of compute.
+# ── Slot 3: K=5632 (FFN down projections) ────────────────────────────────────
 # Build command:
-#   make dtype_in=i8 dtype_out=i32 AIE_TARGET=aie2p M=2048 K=5632 N=64 m=64 k=64 n=64 n_aie_cols=1
-export GGML_XDNA_XCLBIN_PATH_3=~/xclbin/k5632.xclbin
-export GGML_XDNA_INSTR_PATH_3=~/xclbin/k5632_sequence.bin
+#   make dtype_in=i8 dtype_out=i32 AIE_TARGET=aie2p \
+#        M=2048 K=5632 N=64 m=64 k=64 n=64 n_aie_cols=4
+export GGML_XDNA_XCLBIN_PATH_3=~/xclbin-decode/k5632_n64_decode.xclbin
+export GGML_XDNA_INSTR_PATH_3=~/xclbin-decode/k5632_n64_decode.txt
 export GGML_XDNA_TILE_M3=2048
 export GGML_XDNA_TILE_K3=5632
 export GGML_XDNA_TILE_N3=64
 
-# ── Slot 4: K=14336 (FFN gate/up projections, LLaMA-3 8B) ───────────────────
-# Optional but recommended for LLaMA-3 8B — covers ~45% of compute.
+# ── Slot 4: K=14336 (FFN gate/up projections) ────────────────────────────────
 # Build command:
-#   make dtype_in=i8 dtype_out=i32 AIE_TARGET=aie2p M=2048 K=14336 N=64 m=64 k=64 n=64 n_aie_cols=1
-export GGML_XDNA_XCLBIN_PATH_4=~/xclbin/k14336.xclbin
-export GGML_XDNA_INSTR_PATH_4=~/xclbin/k14336_sequence.bin
+#   make dtype_in=i8 dtype_out=i32 AIE_TARGET=aie2p \
+#        M=2048 K=14336 N=64 m=64 k=64 n=64 n_aie_cols=4
+export GGML_XDNA_XCLBIN_PATH_4=~/xclbin-decode/k14336_n64_decode.xclbin
+export GGML_XDNA_INSTR_PATH_4=~/xclbin-decode/k14336_n64_decode.txt
 export GGML_XDNA_TILE_M4=2048
 export GGML_XDNA_TILE_K4=14336
 export GGML_XDNA_TILE_N4=64
 
 # ── Tuning ────────────────────────────────────────────────────────────────────
-# Minimum N dimension before bypassing the NPU (default: skip very small matmuls).
-# Set to 2 to maximise NPU coverage (attempt everything >= N=2).
-export GGML_XDNA_MIN_N=2
-
 # Per-tile kernel timeout in milliseconds (default: 5000).
 # Increase if you see timeout errors on a thermally-throttled system.
 # export GGML_XDNA_TIMEOUT_MS=5000

@@ -230,9 +230,11 @@
       <div class="win-box">
         <div class="win-label">Wins</div>
         <div class="wins">
-          <span class="win-stat">Decode +11.2× (3.76 → 42 t/s)</span>
+          <span class="win-stat">Decode +11.7× (3.76 → 43.84 t/s)</span>
           <span class="win-stat">Prefill +30× (31 → 931 t/s)</span>
           <span class="win-stat">NPU decode confirmed hardware</span>
+          <span class="win-stat">Beats Vulkan: 0.947 vs 1.3 J/tok</span>
+          <span class="win-stat">Lower power than Vulkan: 41.5 vs 52.2 W</span>
         </div>
       </div>
 
@@ -249,10 +251,18 @@
         <tr>
           <td>Decode tg64</td>
           <td class="muted">3.76 t/s</td>
-          <td class="highlight">42.12 t/s</td>
+          <td class="highlight">43.84 t/s</td>
           <td><span class="tag">NPU</span></td>
-          <td class="highlight">+11.2×</td>
+          <td class="highlight">+11.7×</td>
         </tr>
+      </table>
+
+      <div class="section-label">Power (decode, tg64)</div>
+      <table>
+        <tr><th>Backend</th><th>Decode</th><th>Avg Power</th><th>J/tok</th></tr>
+        <tr><td>Phase 6 (CPU decode)</td><td class="muted">3.76 t/s</td><td class="muted">58.5 W</td><td class="muted">16.2 J/tok</td></tr>
+        <tr><td>Vulkan</td><td>41.6 t/s</td><td>52.2 W</td><td>1.3 J/tok</td></tr>
+        <tr><td><strong>Phase 7 NPU decode</strong></td><td class="highlight">43.84 t/s</td><td class="highlight">41.5 W</td><td class="highlight">0.947 J/tok</td></tr>
       </table>
 
       <div class="section-label">What Changed</div>
