@@ -201,6 +201,8 @@ ggml_xdna: slot 2 ready — tile 2048×5632×64
 | `GGML_XDNA_TILE_M` | 32 | Slot 1 tile rows |
 | `GGML_XDNA_TILE_K` | 32 | Slot 1 tile inner dimension |
 | `GGML_XDNA_TILE_N` | 32 | Slot 1 tile cols |
+| `GGML_XDNA_MIN_N` | 2 | Min activation batch size to offload; set to 1 to include single-token decode |
+| `GGML_XDNA_MAX_N` | 131072 | Max activation batch size to offload; set to 1 with MIN_N=1 for NPU-decode-only mode |
 | `GGML_XDNA_MIN_BATCH` | 32768 | Min M×N×K to offload to NPU |
 | `GGML_XDNA_TIMEOUT_MS` | 5000 | Per-tile kernel timeout (ms) |
 | `GGML_XDNA_XCLBIN_PATH_2` | — | Path to slot 2 `.xclbin` (optional) |
@@ -217,18 +219,22 @@ ggml_xdna: slot 2 ready — tile 2048×5632×64
 
 All measurements: Meta-Llama-3.1-8B-Instruct Q4_K_M, `llama-bench -r 1 --no-warmup`, Ryzen AI MAX 385.
 
-| Backend | pp=512 | pp=2048 | pp=4096 | pp=8192 | Decode |
-|---------|--------|---------|---------|---------|--------|
+| Backend | pp=512 | pp=2048 | pp=4096 | pp=8192 | Decode (tg64) |
+|---------|--------|---------|---------|---------|--------------|
 | CPU only | 4.6 t/s | 4.3 t/s | 4.0 t/s | 3.6 t/s | ~4.4 t/s |
 | NPU 1-col (Phase 5, ub=512) | 10.2 t/s | 12.9 t/s | 11.7 t/s | 8.9 t/s | ~4.1 t/s |
-| **NPU 4-col (Phase 6, ub=512)** | **13.7 t/s** | **19.5 t/s** | **16.2 t/s** | **10.9 t/s** | ~4.1 t/s |
+| NPU 4-col (Phase 6, ub=512) | 13.7 t/s | 19.5 t/s | 16.2 t/s | 10.9 t/s | ~4.1 t/s |
 | Vulkan iGPU (KHR_coopmat, ngl=99) | 833 t/s | 783 t/s | 696 t/s | 609 t/s | ~43 t/s |
+| **Phase 7: Vulkan prefill + NPU decode** | **930 t/s** | — | — | — | **42 t/s** |
 
 Notes:
+- **Phase 7**: Vulkan handles prefill (930 t/s pp512), NPU handles decode (42 t/s) — confirmed NPU-only decode by disabling Vulkan (42.90 t/s unchanged)
+- **Phase 7 decode: +11× vs CPU baseline** (42 t/s vs 3.76 t/s CPU-only decode)
+- NPU decode speed is equivalent to Vulkan decode (~43 t/s) but uses dedicated XDNA2 silicon, leaving the iGPU free for other workloads
+- `MIN_N=1, MAX_N=1` enables NPU-decode-only mode; Vulkan takes all prefill ops (N>1 falls outside NPU range)
 - **Phase 6 (4-col NPU, TILE_N=256)**: +35–51% prefill vs Phase 5 — uses all 4 AIE columns in parallel
-- **NPU is 3–5× faster than CPU** at all context lengths; peak at pp=2048 (19.5 t/s, full tile utilisation)
+- **NPU prefill is 3–5× faster than CPU** at all context lengths; peak at pp=2048 (19.5 t/s, full tile utilisation)
 - NPU prefill degrades at long context because attention score matmuls (K=seq_len, variable) fall back to CPU; only fixed-K projection matmuls offload to NPU
-- `--ubatch-size 2048` does **not** improve NPU throughput — larger CPU-side attention batches (O(n²)) outweigh better tile utilisation
 - Vulkan degrades ~27% from 512→8192 tokens; NPU 4-col degrades ~21% (more context-resilient than GPU)
 - 8k context validated without OOM (KV cache ≈ 1 GiB; model ≈ 4.6 GiB; 30 GiB RAM is sufficient)
 
@@ -264,6 +270,7 @@ Notes:
 | 4 | ✅ Done | Workload-isolation characterisation — power measurement vs Vulkan; NPU confirmed as non-competing backend (dedicated XDNA2 silicon); `bench-power.sh` tooling |
 | 5 | ✅ Done | Long context (8k–32k) — validated at 8k with 30 GiB RAM; NPU 2–3× over CPU; peaks at pp=2048; attention falls to CPU at long context (variable-K not covered by xclbins); `bench-context.sh` tooling |
 | 6 | ✅ Done | Multi-core NPU (4-col, TILE_N=256) — 4× AIE column parallelism; peak pp=2048: 19.5 t/s (+51% vs Phase 5); all 4 K-slots upgraded to 4-col xclbins |
+| 7 | ✅ Done | NPU decode acceleration (TILE_N=64) — decode xclbins (n=16 minimum per AIE constraint); MIN_N=1, MAX_N=1 routes N=1 decode to NPU, prefill to Vulkan; decode 42 t/s (+11× vs CPU); prefill 930 t/s via Vulkan |
 
 ---
 

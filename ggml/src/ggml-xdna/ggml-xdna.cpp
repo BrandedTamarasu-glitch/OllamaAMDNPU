@@ -41,12 +41,18 @@
  *                             Set to 1 with MIN_N=1 to restrict NPU to decode only,
  *                             letting Vulkan handle large-batch prefill ops.
  *
- * Optional extra xclbin slots (e.g. different K dimensions for FFN layers):
- *   GGML_XDNA_XCLBIN_PATH_2..4 — path to xclbin        (all three required per slot)
- *   GGML_XDNA_INSTR_PATH_2..4  — path to _sequence.bin
- *   GGML_XDNA_TILE_K2..4       — K dimension (required)
- *   GGML_XDNA_TILE_M2..4       — tile rows   (default 32)
- *   GGML_XDNA_TILE_N2..4       — tile cols   (default 32)
+ * Optional extra xclbin slots (e.g. different K dimensions or tile_n for decode):
+ *   GGML_XDNA_XCLBIN_PATH_2..8 — path to xclbin        (all three required per slot)
+ *   GGML_XDNA_INSTR_PATH_2..8  — path to _sequence.bin
+ *   GGML_XDNA_TILE_K2..8       — K dimension (required)
+ *   GGML_XDNA_TILE_M2..8       — tile rows   (default 32)
+ *   GGML_XDNA_TILE_N2..8       — tile cols   (default 32)
+ *
+ *   Typical two-tier setup (prefill + decode):
+ *     Slots 1–4:  tile_n=256 xclbins for prefill (large N)
+ *     Slots 5–8:  tile_n=32  xclbins for decode  (small N, same K values)
+ *   find_slot() picks the slot with the largest tile_n ≤ N, so the decode
+ *   xclbins are selected automatically when N ≤ 32 (with MIN_N=1 set).
  *
  * Build the xclbin with:
  *   cd mlir-aie/programming_examples/basic/matrix_multiplication/single_core
@@ -102,10 +108,11 @@ static int64_t xdna_env_int(const char * name, int64_t def, int64_t max_val) {
 struct ggml_backend_xdna_context {
     xrt::device device;
 
-    // Per-xclbin slot — up to MAX_SLOTS with different K dimensions.
+    // Per-xclbin slot — up to MAX_SLOTS with different K or tile_n dimensions.
     // Slot 0 is the primary (GGML_XDNA_XCLBIN_PATH / GGML_XDNA_TILE_K).
-    // Slots 1–3 are optional extras (_2 / _3 / _4 env suffix).
-    static constexpr int MAX_SLOTS = 4;
+    // Slots 1–7 are optional extras (_2 / _3 / ... / _8 env suffix).
+    // Typical layout: slots 0–3 = prefill (tile_n=256), slots 4–7 = decode (tile_n=32).
+    static constexpr int MAX_SLOTS = 8;
     struct XclbinSlot {
         std::unique_ptr<xrt::hw_context> hw_ctx;
         std::unique_ptr<xrt::kernel>     kernel;
@@ -116,6 +123,12 @@ struct ggml_backend_xdna_context {
         int64_t tile_k = 0;   // 0 = slot disabled
         int64_t tile_n = 32;
         bool    ready  = false;
+
+        // Dispatch timing — tracks wall-clock latency of each dispatch_tile call
+        // (DMA in + kernel + DMA out).  Used to log break-even min_batch so the
+        // caller can calibrate GGML_XDNA_MIN_BATCH with real measurements.
+        uint64_t dispatch_count   = 0;  // total calls
+        double   dispatch_us_sum  = 0;  // cumulative wall-clock µs (all dispatches)
     };
     XclbinSlot slots[MAX_SLOTS];
 
@@ -176,12 +189,28 @@ struct ggml_backend_xdna_context {
         timeout_ms      = xdna_env_int("GGML_XDNA_TIMEOUT_MS", 5000, INT64_MAX);
     }
 
-    // Returns the index of the first slot whose tile_k matches K, or -1.
-    int find_slot(int64_t K) const {
+    // Returns the index of the best slot for (K, N), or -1 if none match K.
+    //
+    // Selection rule: among all ready slots with matching tile_k, prefer the one
+    // whose tile_n is the largest value ≤ N (best fit without waste).  If every
+    // matching slot has tile_n > N (decode case where N=1 < tile_n=32), fall back
+    // to the slot with the smallest tile_n (minimises zero-padding waste).
+    int find_slot(int64_t K, int64_t N) const {
+        int best_idx        = -1;
+        int64_t best_tile_n = -1;   // largest tile_n ≤ N seen so far
+        int fallback_idx    = -1;
+        int64_t fallback_tn = INT64_MAX; // smallest tile_n > N seen so far
+
         for (int i = 0; i < MAX_SLOTS; i++) {
-            if (slots[i].ready && slots[i].tile_k == K) { return i; }
+            if (!slots[i].ready || slots[i].tile_k != K) { continue; }
+            const int64_t tn = slots[i].tile_n;
+            if (tn <= N) {
+                if (tn > best_tile_n) { best_tile_n = tn; best_idx = i; }
+            } else {
+                if (tn < fallback_tn) { fallback_tn = tn; fallback_idx = i; }
+            }
         }
-        return -1;
+        return (best_idx >= 0) ? best_idx : fallback_idx;
     }
 };
 
@@ -240,6 +269,8 @@ static bool dispatch_tile(ggml_backend_xdna_context * ctx,
     const int64_t tk = s.tile_k;
     const int64_t tn = s.tile_n;
 
+    const auto t0 = std::chrono::steady_clock::now();
+
     std::memcpy(bo_a.map<int8_t *>(), a_tile, (size_t)tm * tk * sizeof(int8_t));
     std::memcpy(bo_b.map<int8_t *>(), b_tile, (size_t)tk * tn * sizeof(int8_t));
 
@@ -262,6 +293,38 @@ static bool dispatch_tile(ggml_backend_xdna_context * ctx,
     bo_c.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
     // kernel always fully overwrites bo_c (never accumulates); safe to read directly.
     std::memcpy(c_tile, bo_c.map<const int32_t *>(), (size_t)tm * tn * sizeof(int32_t));
+
+    // --- Timing ---
+    const double elapsed_us = std::chrono::duration<double, std::micro>(
+        std::chrono::steady_clock::now() - t0).count();
+    s.dispatch_count++;
+    s.dispatch_us_sum += elapsed_us;
+
+    // Log on first dispatch, first 10 dispatches, then every 1000.
+    // Emits per-dispatch latency + the min_batch break-even vs a reference
+    // CPU throughput of 200 GFLOPS/s (conservative; real CPUs are 100–500).
+    // Tune GGML_XDNA_MIN_BATCH to the logged break-even to permanently
+    // prevent dispatches where NPU overhead exceeds compute savings.
+    const uint64_t cnt = s.dispatch_count;
+    if (cnt <= 10 || cnt % 1000 == 0) {
+        const double avg_us   = s.dispatch_us_sum / (double)cnt;
+        const double tile_ops = 2.0 * (double)tm * (double)tk * (double)tn; // 2*M*K*N MACs
+        const double tops     = tile_ops / (elapsed_us * 1e-6) / 1e12;
+        // break-even: dispatch_overhead_s * cpu_gflops * 1e9 = min_batch ops
+        // Using avg latency as proxy for overhead at this tile size.
+        // Calibrated from llama-bench tg20 CPU-only on Llama-3.1-8B-Q4_K_M: 3.76 t/s × 14 GFLOPs/tok
+        const double cpu_gflops    = 52.6;
+        const double breakeven_ops = avg_us * 1e-6 * cpu_gflops * 1e9;
+        GGML_LOG_INFO("ggml_xdna: slot %d [%lld×%lld×%lld] dispatch #%llu: "
+                      "%.1f µs  %.2f TOPS  avg %.1f µs  "
+                      "break-even min_batch ~%.0f (at %.0f CPU GFLOPS/s)\n",
+                      slot_idx,
+                      (long long)tm, (long long)tk, (long long)tn,
+                      (unsigned long long)cnt,
+                      elapsed_us, tops, avg_us,
+                      breakeven_ops, cpu_gflops);
+    }
+
     return true;
 }
 
@@ -287,10 +350,10 @@ static bool ggml_backend_xdna_mul_mat(ggml_backend_xdna_context * ctx,
     const int64_t K = ne10; // inner dimension
     const int64_t N = ne11; // activation batch
 
-    const int slot_idx = ctx->find_slot(K);
+    const int slot_idx = ctx->find_slot(K, N);
     if (slot_idx < 0) {
-        GGML_LOG_ERROR("ggml_xdna: mul_mat called for K=%lld with no matching slot — "
-                       "supports_op should have prevented this\n", (long long)K);
+        GGML_LOG_ERROR("ggml_xdna: mul_mat called for K=%lld N=%lld with no matching slot — "
+                       "supports_op should have prevented this\n", (long long)K, (long long)N);
         return false;
     }
     const auto & sl = ctx->slots[slot_idx];
@@ -559,7 +622,7 @@ static bool ggml_backend_xdna_device_supports_op(ggml_backend_dev_t       dev,
             // The xclbin is compiled for a fixed K dimension.
             // K-accumulation is handled internally by the AIE; we only dispatch
             // matrices whose K exactly matches one of the loaded xclbins.
-            if (ctx->find_slot(K) < 0) { return false; }
+            if (ctx->find_slot(K, N) < 0) { return false; }
             if ((double)M * N * K < (double)ctx->min_batch) { return false; }
             if (N < ctx->min_n) { return false; }
             if (N > ctx->max_n) { return false; }
@@ -670,21 +733,31 @@ static bool try_init_context(ggml_backend_xdna_context * ctx) {
               0);
     ctx->kernel_ready = true;
 
-    // --- Optional slots 1–3 (env suffix _2, _3, _4) ---
+    // --- Optional slots 1–7 (env suffix _2 through _8) ---
     static const char * const xclbin_vars[] = {
-        "GGML_XDNA_XCLBIN_PATH_2", "GGML_XDNA_XCLBIN_PATH_3", "GGML_XDNA_XCLBIN_PATH_4"
+        "GGML_XDNA_XCLBIN_PATH_2", "GGML_XDNA_XCLBIN_PATH_3", "GGML_XDNA_XCLBIN_PATH_4",
+        "GGML_XDNA_XCLBIN_PATH_5", "GGML_XDNA_XCLBIN_PATH_6", "GGML_XDNA_XCLBIN_PATH_7",
+        "GGML_XDNA_XCLBIN_PATH_8"
     };
     static const char * const instr_vars[] = {
-        "GGML_XDNA_INSTR_PATH_2", "GGML_XDNA_INSTR_PATH_3", "GGML_XDNA_INSTR_PATH_4"
+        "GGML_XDNA_INSTR_PATH_2", "GGML_XDNA_INSTR_PATH_3", "GGML_XDNA_INSTR_PATH_4",
+        "GGML_XDNA_INSTR_PATH_5", "GGML_XDNA_INSTR_PATH_6", "GGML_XDNA_INSTR_PATH_7",
+        "GGML_XDNA_INSTR_PATH_8"
     };
     static const char * const tile_k_vars[] = {
-        "GGML_XDNA_TILE_K2", "GGML_XDNA_TILE_K3", "GGML_XDNA_TILE_K4"
+        "GGML_XDNA_TILE_K2", "GGML_XDNA_TILE_K3", "GGML_XDNA_TILE_K4",
+        "GGML_XDNA_TILE_K5", "GGML_XDNA_TILE_K6", "GGML_XDNA_TILE_K7",
+        "GGML_XDNA_TILE_K8"
     };
     static const char * const tile_m_vars[] = {
-        "GGML_XDNA_TILE_M2", "GGML_XDNA_TILE_M3", "GGML_XDNA_TILE_M4"
+        "GGML_XDNA_TILE_M2", "GGML_XDNA_TILE_M3", "GGML_XDNA_TILE_M4",
+        "GGML_XDNA_TILE_M5", "GGML_XDNA_TILE_M6", "GGML_XDNA_TILE_M7",
+        "GGML_XDNA_TILE_M8"
     };
     static const char * const tile_n_vars[] = {
-        "GGML_XDNA_TILE_N2", "GGML_XDNA_TILE_N3", "GGML_XDNA_TILE_N4"
+        "GGML_XDNA_TILE_N2", "GGML_XDNA_TILE_N3", "GGML_XDNA_TILE_N4",
+        "GGML_XDNA_TILE_N5", "GGML_XDNA_TILE_N6", "GGML_XDNA_TILE_N7",
+        "GGML_XDNA_TILE_N8"
     };
 
     for (int i = 0; i < ggml_backend_xdna_context::MAX_SLOTS - 1; i++) {
