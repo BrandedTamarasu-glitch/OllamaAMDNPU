@@ -39,20 +39,29 @@
     <div class="hardware-pill">Ryzen AI MAX 385 &nbsp;·&nbsp; RyzenAI-npu5 (XDNA2)</div>
   </header>
 
-  <a class="entry" href="phase8.html" style="border-color: #bc8cff33;">
-    <div class="phase-badge" style="background:#2d1f47; color:#bc8cff; border-color:#bc8cff;">8</div>
+  <a class="entry" href="phase9.html" style="border-color: #e3693a33;">
+    <div class="phase-badge" style="background:#3a1e0d; color:#e3693a; border-color:#e3693a;">9</div>
     <div class="entry-body">
-      <h2>Phase 8 — Performance Ceiling Investigation</h2>
-      <p>Batch sweep · int4 · cascade · speculative decoding · 43.7 t/s ceiling confirmed · 2026-03-26</p>
+      <h2>Phase 9 — Root Cause Investigation &amp; Phase 6 Restoration</h2>
+      <p>Phase 7 decode misattribution corrected · NPU prefill restored (12–18 t/s) · dispatch timing removed · 2026-03-28</p>
     </div>
     <span class="arrow">›</span>
   </a>
 
-  <a class="entry" href="phase7.html">
-    <div class="phase-badge">7</div>
+  <a class="entry" href="phase8.html" style="border-color: #bc8cff33;">
+    <div class="phase-badge" style="background:#2d1f47; color:#bc8cff; border-color:#bc8cff;">8</div>
     <div class="entry-body">
-      <h2>Phase 7 — NPU Decode Acceleration + Vulkan Prefill</h2>
-      <p>Decode +11.2× (42 t/s NPU) · Prefill +30× (930 t/s Vulkan) · 2026-03-26</p>
+      <h2>Phase 8 — Vulkan Decode Ceiling Investigation</h2>
+      <p>Batch sweep · int4 · cascade · speculative decoding · 43.7 t/s Vulkan ceiling confirmed · 2026-03-26</p>
+    </div>
+    <span class="arrow">›</span>
+  </a>
+
+  <a class="entry" href="phase7.html" style="border-color: #f8514933;">
+    <div class="phase-badge" style="background:#3d1a1a; color:#f85149; border-color:#f85149;">7</div>
+    <div class="entry-body">
+      <h2>Phase 7 — Vulkan Prefill (930 t/s) ⚠️ Decode Claim Corrected</h2>
+      <p>930 t/s Vulkan prefill ✓ · 43.84 t/s decode was Vulkan, not NPU · see Phase 9 · 2026-03-26</p>
     </div>
     <span class="arrow">›</span>
   </a>

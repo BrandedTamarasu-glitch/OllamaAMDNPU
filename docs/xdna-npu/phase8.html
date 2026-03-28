@@ -225,6 +225,35 @@
     <div class="hardware-pill">Ryzen AI MAX 385 &nbsp;·&nbsp; RyzenAI-npu5 (XDNA2) &nbsp;·&nbsp; Meta-Llama-3.1-8B-Instruct Q4_K_M</div>
   </header>
 
+  <!-- Context note — Phase 9 (2026-03-28) -->
+  <div style="
+    background: var(--purple-dim);
+    border: 1px solid var(--purple);
+    border-left: 4px solid var(--purple);
+    border-radius: 8px;
+    padding: 0.85rem 1.25rem;
+    margin-bottom: 2rem;
+  ">
+    <div style="
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--purple);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.5rem;
+    ">&#8505; Context &mdash; Phase 9 (2026-03-28)</div>
+
+    <p style="font-size: 0.87rem; color: var(--text);">
+      The <strong>43.7 t/s "NPU decode" baseline</strong> used throughout this investigation was later
+      found to be <strong style="color: var(--purple);">Vulkan decode</strong>
+      (see <a href="phase7.html" style="color: var(--blue); text-decoration: none;">Phase 7 correction</a>).
+      The ceiling analysis and methodology on this page remain correct for Vulkan decode on this hardware.
+      The LPDDR5 bandwidth ceiling at 43.7 t/s is real &mdash; it applies to Vulkan decode, which is what
+      was actually being measured.
+      See <a href="phase9.html" style="color: var(--blue); text-decoration: none;">Phase 9</a> for details.
+    </p>
+  </div>
+
   <!-- Phase 8 -->
   <div class="phase research">
     <div class="phase-header">

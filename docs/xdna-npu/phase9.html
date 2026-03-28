@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AMD XDNA2 NPU Backend — Phase 9 Changelog</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --green: #3fb950;
+      --green-dim: #1a3a22;
+      --blue: #58a6ff;
+      --yellow: #d29922;
+      --yellow-dim: #2e2208;
+      --red: #f85149;
+      --red-dim: #3d1a1a;
+      --orange: #e3693a;
+      --orange-dim: #3a1e0d;
+      --purple: #bc8cff;
+      --purple-dim: #2d1f47;
+      --tag-bg: #1f2937;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 2rem 1rem;
+    }
+    .container { max-width: 860px; margin: 0 auto; }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1.5rem;
+      margin-bottom: 2.5rem;
+    }
+    header h1 { font-size: 1.6rem; font-weight: 700; color: var(--text); }
+    header h1 span { color: var(--blue); }
+    header p { color: var(--muted); margin-top: 0.4rem; font-size: 0.9rem; }
+    header a { color: var(--blue); text-decoration: none; }
+    header a:hover { text-decoration: underline; }
+
+    .hardware-pill {
+      display: inline-block;
+      background: var(--tag-bg);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 0.2rem 0.75rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 0.6rem;
+    }
+
+    .phase {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 1.5rem;
+      overflow: hidden;
+    }
+    .phase-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+      padding: 1.1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .phase-number {
+      flex-shrink: 0;
+      width: 2rem;
+      height: 2rem;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+      font-weight: 700;
+      background: var(--tag-bg);
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .phase.done .phase-number {
+      background: var(--green-dim);
+      color: var(--green);
+      border-color: var(--green);
+    }
+    .phase.research .phase-number {
+      background: var(--purple-dim);
+      color: var(--purple);
+      border-color: var(--purple);
+    }
+    .phase.correction .phase-number {
+      background: var(--orange-dim);
+      color: var(--orange);
+      border-color: var(--orange);
+    }
+    .phase-title { flex: 1; }
+    .phase-title h2 { font-size: 1rem; font-weight: 600; color: var(--text); }
+    .phase-title p { font-size: 0.83rem; color: var(--muted); margin-top: 0.2rem; }
+    .badge {
+      flex-shrink: 0;
+      font-size: 0.72rem;
+      padding: 0.18rem 0.55rem;
+      border-radius: 12px;
+      font-weight: 600;
+      align-self: flex-start;
+      margin-top: 0.15rem;
+    }
+    .badge.done       { background: var(--green-dim);  color: var(--green); }
+    .badge.ceiling    { background: var(--purple-dim); color: var(--purple); }
+    .badge.dead-end   { background: var(--red-dim);    color: var(--red); }
+    .badge.correction { background: var(--orange-dim); color: var(--orange); }
+    .badge.restored   { background: var(--green-dim);  color: var(--green); }
+
+    .phase-body { padding: 1.1rem 1.25rem; }
+
+    .conclusion-box {
+      background: var(--purple-dim);
+      border: 1px solid var(--purple);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .conclusion-box .label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--purple);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.3rem;
+    }
+    .conclusion-box p { font-size: 0.87rem; color: var(--text); }
+
+    .warning-box {
+      background: var(--orange-dim);
+      border: 1px solid var(--orange);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .warning-box .label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--orange);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.3rem;
+    }
+    .warning-box p { font-size: 0.87rem; color: var(--text); }
+    .warning-box ul { font-size: 0.86rem; color: var(--text); padding-left: 1.1rem; }
+    .warning-box ul li { margin-bottom: 0.2rem; }
+
+    .dead-box {
+      background: var(--red-dim);
+      border: 1px solid var(--red);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .dead-box .label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--red);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.3rem;
+    }
+    .dead-box p  { font-size: 0.87rem; color: var(--text); }
+    .dead-box ul { font-size: 0.86rem; color: var(--text); padding-left: 1.1rem; }
+    .dead-box ul li { margin-bottom: 0.2rem; }
+
+    .good-box {
+      background: var(--green-dim);
+      border: 1px solid var(--green);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .good-box .label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--green);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.3rem;
+    }
+    .good-box p  { font-size: 0.87rem; color: var(--text); }
+    .good-box ul { font-size: 0.86rem; color: var(--text); padding-left: 1.1rem; }
+    .good-box ul li { margin-bottom: 0.2rem; }
+
+    .details p { font-size: 0.87rem; color: var(--muted); margin-bottom: 0.4rem; }
+    .details p:last-child { margin-bottom: 0; }
+    .details strong { color: var(--text); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.83rem;
+      margin-top: 0.75rem;
+    }
+    th {
+      text-align: left;
+      color: var(--muted);
+      font-weight: 600;
+      padding: 0.4rem 0.6rem;
+      border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: 0.4rem 0.6rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+    }
+    tr:last-child td { border-bottom: none; }
+    td.highlight { color: var(--green); font-weight: 600; }
+    td.muted     { color: var(--muted); }
+    td.dead      { color: var(--red); }
+    td.wrong     { background: var(--red-dim); color: var(--red); }
+    td.correct   { background: var(--green-dim); color: var(--green); font-weight: 600; }
+    td.same      { color: var(--yellow); }
+
+    .tag {
+      display: inline-block;
+      background: var(--tag-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.1rem 0.4rem;
+      font-size: 0.76rem;
+      color: var(--muted);
+      font-family: "SF Mono", "Consolas", monospace;
+    }
+
+    code {
+      font-family: "SF Mono", "Consolas", monospace;
+      font-size: 0.84em;
+      background: var(--tag-bg);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 0.05em 0.3em;
+    }
+
+    .section-label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin: 0.9rem 0 0.4rem;
+    }
+
+    .subphase-label {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--blue);
+      margin: 1.1rem 0 0.4rem;
+      padding-bottom: 0.3rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    footer {
+      border-top: 1px solid var(--border);
+      padding-top: 1.5rem;
+      margin-top: 2.5rem;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+    footer a { color: var(--blue); text-decoration: none; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <h1>AMD <span>XDNA2 NPU</span> Backend — Changelog</h1>
+    <p>
+      <a href="phase8.html">← Phase 8</a>
+      &nbsp;·&nbsp;
+      Custom <a href="https://github.com/ggml-org/llama.cpp">llama.cpp</a> backend offloading
+      <code>GGML_OP_MUL_MAT</code> to the AMD XDNA2 NPU via XRT kernel dispatch. &nbsp;·&nbsp;
+      <a href="https://github.com/BrandedTamarasu-glitch/OllamaAMDNPU">GitHub</a>
+    </p>
+    <div class="hardware-pill">Ryzen AI MAX 385 &nbsp;·&nbsp; RyzenAI-npu5 (XDNA2)</div>
+  </header>
+
+  <!-- Phase 9 -->
+  <div class="phase correction">
+    <div class="phase-header">
+      <div class="phase-number">9</div>
+      <div class="phase-title">
+        <h2>Root Cause Investigation &amp; Phase 6 Restoration</h2>
+        <p>llama-bench ngl default &nbsp;·&nbsp; dispatch timing &nbsp;·&nbsp; Phase 7 misattribution corrected &nbsp;·&nbsp; Phase 6 prefill restored &nbsp;·&nbsp; 2026-03-28</p>
+      </div>
+      <span class="badge correction">Correction</span>
+    </div>
+    <div class="phase-body">
+
+      <!-- Section 1 -->
+      <div class="subphase-label">1 — Summary: What Was Investigated</div>
+      <div class="details">
+        <p>Phase 7 claimed <strong>43.84 t/s NPU decode</strong>. Phase 8 accepted this as the baseline and investigated why it could not be exceeded. Phase 9 restarted with fresh eyes after a regression was detected: current NPU decode measured at <strong>0.65 t/s</strong>.</p>
+        <p>The investigation traced the regression to its root cause, corrected the Phase 7 record, and restored the Phase 6 NPU prefill baseline.</p>
+      </div>
+
+      <!-- Section 2 -->
+      <div class="subphase-label">2 — Root Cause: llama-bench ngl Default</div>
+      <div class="warning-box">
+        <div class="label">Misattribution</div>
+        <p><code>llama-bench</code> defaults to <code>ngl=99</code> (all layers on GPU) when no <code>-ngl</code> flag is provided. Phase 7's bench command (<code>-p 0 -n 64 -ub 1 -r 1</code>) did not specify <code>-ngl</code>, so the benchmark silently used Vulkan for all decode. The 43.84 t/s result was <strong>Vulkan decode</strong>, not NPU decode.</p>
+      </div>
+      <div class="details">
+        <p><strong>Confirmation:</strong> running the exact Phase 7 command today produces <strong>44.09 ± 0.01 t/s</strong> with <code>ngl=99, backend=Vulkan,XDNA</code> in the output — same number, same backend.</p>
+      </div>
+
+      <!-- Section 3 -->
+      <div class="subphase-label">3 — Why the GGML_VK_DISABLE=1 Confirmation Was Wrong</div>
+      <div class="dead-box">
+        <div class="label">Invalid Isolation Test</div>
+        <p>Phase 7 docs claimed <code>GGML_VK_DISABLE=1</code> left decode at 42.90 t/s (unchanged), proving Vulkan contributed nothing. In Phase 9 testing, <code>GGML_VK_DISABLE=1</code> produced identical results to without it — 527 t/s prefill, ~44 t/s decode. The env var does not disable the Vulkan backend in this build. The confirmation test was not a valid isolation.</p>
+      </div>
+
+      <!-- Section 4 -->
+      <div class="subphase-label">4 — Physical Limits of NPU Decode</div>
+      <div class="details">
+        <p>Actual NPU decode via XDNA was measured with timing instrumentation in <code>dispatch_tile</code>:</p>
+      </div>
+      <table>
+        <tr>
+          <th>Stage</th>
+          <th>K=4096 tile</th>
+          <th>K=14336 tile</th>
+        </tr>
+        <tr>
+          <td>memcpy host→bo_a + bo_b</td>
+          <td>280 µs</td>
+          <td>1100 µs</td>
+        </tr>
+        <tr>
+          <td>bo.sync to NPU (DMA)</td>
+          <td>134 µs</td>
+          <td>250 µs</td>
+        </tr>
+        <tr>
+          <td>kernel (run.wait)</td>
+          <td>733 µs</td>
+          <td>~3000 µs</td>
+        </tr>
+        <tr>
+          <td>bo.sync from NPU</td>
+          <td>5 µs</td>
+          <td>5 µs</td>
+        </tr>
+        <tr>
+          <td><strong>Total per dispatch</strong></td>
+          <td class="dead"><strong>~1155 µs</strong></td>
+          <td class="dead"><strong>~4400 µs</strong></td>
+        </tr>
+      </table>
+      <div class="details" style="margin-top:0.75rem;">
+        <p>Per token: ~704 dispatches × 1155 µs = <strong>813 ms/token → max ~1.2 t/s physical ceiling</strong>.</p>
+        <p>For 44 t/s (22 ms/token), each dispatch would need ~32 µs. The memcpy alone (8 MB bo_a) takes 280 µs at available memory bandwidth. <strong>NPU decode at 44 t/s is physically impossible</strong> with the current dispatch architecture.</p>
+        <p>Measured NPU decode: <strong class="dead">0.65 t/s</strong> — consistent with the physics.</p>
+      </div>
+
+      <!-- Section 5 -->
+      <div class="subphase-label">5 — Phase 7's Secondary Regression: Prefill Broken</div>
+      <div class="warning-box">
+        <div class="label">Secondary Regression</div>
+        <p>Phase 7 also broke Phase 6 NPU prefill by:</p>
+        <ul style="margin-top:0.4rem;">
+          <li>Replacing all xclbin slots with decode-optimised kernels (TILE_N=64 decode xclbins replacing TILE_N=256 prefill xclbins)</li>
+          <li>Setting <code>GGML_XDNA_MIN_N=1 GGML_XDNA_MAX_N=1</code> permanently in <code>.zshrc</code>, blocking all N&gt;1 ops from XDNA</li>
+        </ul>
+      </div>
+      <div class="good-box">
+        <div class="label">Preserved</div>
+        <p>The original Phase 6 4-col prefill xclbins (<code>~/xclbin-4col/</code>) were preserved on disk and never deleted.</p>
+      </div>
+
+      <!-- Section 6 -->
+      <div class="subphase-label">6 — What Phase 7 Actually Achieved (Corrected Record)</div>
+      <table>
+        <tr>
+          <th>Claim</th>
+          <th>Reality</th>
+        </tr>
+        <tr>
+          <td>NPU decode 43.84 t/s</td>
+          <td class="wrong">Vulkan decode. NPU decode is 0.65 t/s.</td>
+        </tr>
+        <tr>
+          <td><code>GGML_VK_DISABLE</code> confirms NPU</td>
+          <td class="wrong">VK_DISABLE does not disable Vulkan in this build.</td>
+        </tr>
+        <tr>
+          <td>Decode +11.7× vs CPU</td>
+          <td class="wrong">This was Vulkan vs CPU, not NPU vs CPU.</td>
+        </tr>
+        <tr>
+          <td>Vulkan prefill 930 t/s</td>
+          <td class="correct">Real, confirmed, intact.</td>
+        </tr>
+      </table>
+
+      <!-- Section 7 -->
+      <div class="subphase-label">7 — What Was Restored in Phase 9</div>
+      <div class="good-box">
+        <div class="label">Restored</div>
+        <ul>
+          <li>Reverted <code>.zshrc</code> to Phase 6 config: 4-col TILE_N=256 xclbins from <code>~/xclbin-4col/</code>, <code>MIN_N=2</code></li>
+          <li>Removed Phase 7 dispatch timing instrumentation from <code>dispatch_tile</code> (was running two <code>chrono::now()</code> calls + floating-point accumulation on every hot dispatch)</li>
+        </ul>
+      </div>
+
+      <div class="section-label">Phase 6 Prefill Performance — Verified Restored</div>
+      <table>
+        <tr>
+          <th>Test</th>
+          <th>Phase 6 measured</th>
+          <th>Phase 9 restored</th>
+        </tr>
+        <tr>
+          <td>pp38</td>
+          <td class="muted">16.0 t/s</td>
+          <td class="highlight">11.29 t/s</td>
+        </tr>
+        <tr>
+          <td>pp160</td>
+          <td class="muted">22.0 t/s</td>
+          <td class="highlight">18.37 t/s</td>
+        </tr>
+        <tr>
+          <td>pp512</td>
+          <td class="muted">13.7 t/s</td>
+          <td class="highlight">12.22 t/s</td>
+        </tr>
+      </table>
+      <div class="details" style="margin-top:0.6rem;">
+        <p><strong>Note:</strong> Phase 6 numbers were also measured without strict XDNA isolation (Vulkan may have assisted). Today's numbers are from clean <code>env-i</code> tests forcing XDNA via <code>MAX_N</code>. The practical baseline is <strong>~12–18 t/s NPU prefill</strong> depending on prompt length.</p>
+      </div>
+
+      <!-- Section 8 -->
+      <div class="subphase-label">8 — Corrected System Baseline</div>
+      <table>
+        <tr>
+          <th>Backend</th>
+          <th>Prefill pp512</th>
+          <th>Decode</th>
+        </tr>
+        <tr>
+          <td>XDNA NPU 4-col (restored)</td>
+          <td class="highlight">12.22 t/s</td>
+          <td class="muted">0.65 t/s (physics-limited)</td>
+        </tr>
+        <tr>
+          <td>Vulkan iGPU (ngl=99)</td>
+          <td class="highlight">~530 t/s</td>
+          <td class="highlight">44.09 t/s</td>
+        </tr>
+        <tr>
+          <td>CPU only (ngl=0, no XDNA)</td>
+          <td class="muted">—</td>
+          <td class="muted">3.76 t/s</td>
+        </tr>
+      </table>
+
+      <!-- Section 9 -->
+      <div class="subphase-label">9 — Phase 10 Outlook</div>
+      <div class="conclusion-box">
+        <div class="label">Next Target</div>
+        <p>NPU decode to be viable (~15 t/s) requires <strong>pre-loading weight tiles (bo_a) into NPU BOs at model init</strong> — eliminating the 8 MB DMA copy per dispatch.</p>
+      </div>
+      <div class="details">
+        <p>Estimated dispatch overhead with pre-staged <code>bo_a</code>: bo_b sync (~23 µs) + kernel (~67 µs) + bo_c sync (~5 µs) ≈ <strong>95 µs per dispatch</strong> → 704 × 95 µs = 67 ms/token → <strong>~15 t/s</strong>.</p>
+        <p>Still slower than Vulkan's 44 t/s, but achieves the original goal: inference on dedicated XDNA2 silicon without loading the iGPU. At 15 t/s the NPU becomes useful for sustained decode workloads where iGPU power draw is a concern.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Nav footer -->
+  <p style="font-size:0.84rem; color: var(--muted); margin-bottom: 1rem;">
+    ← <a href="index.html" style="color: var(--blue); text-decoration: none;">All phases</a>
+    &nbsp;·&nbsp;
+    <a href="phase8.html" style="color: var(--blue); text-decoration: none;">Phase 8 — Ceiling Investigation</a>
+  </p>
+
+  <footer>
+    Built with <a href="https://claude.ai/code">Claude Code</a> (claude-sonnet-4-6) ·
+    Hardware: Ryzen AI MAX 385 (RyzenAI-npu5, XDNA2) ·
+    <a href="https://github.com/BrandedTamarasu-glitch/OllamaAMDNPU">GitHub repo</a>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -17,6 +17,7 @@
       --yellow: #d29922;
       --yellow-dim: #2e2208;
       --red: #f85149;
+      --red-dim: #3d1a1a;
       --purple: #bc8cff;
       --tag-bg: #1f2937;
     }
@@ -215,6 +216,63 @@
     </p>
     <div class="hardware-pill">Ryzen AI MAX 385 &nbsp;·&nbsp; RyzenAI-npu5 (XDNA2) &nbsp;·&nbsp; Meta-Llama-3.1-8B-Instruct Q4_K_M</div>
   </header>
+
+  <!-- Correction notice — Phase 9 (2026-03-28) -->
+  <div style="
+    background: var(--red-dim);
+    border: 1px solid var(--red);
+    border-left: 4px solid var(--red);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 2rem;
+  ">
+    <div style="
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--red);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.6rem;
+    ">&#9888; Correction &mdash; Phase 9 (2026-03-28)</div>
+
+    <p style="font-size: 0.87rem; color: var(--text); margin-bottom: 0.65rem;">
+      The <strong>43.84 t/s "NPU decode"</strong> result on this page was later determined to be
+      <strong style="color: var(--red);">Vulkan decode</strong>, not NPU decode.
+    </p>
+
+    <p style="font-size: 0.87rem; color: var(--muted); margin-bottom: 0.5rem;">
+      <strong style="color: var(--text);">Root cause:</strong>
+      <code>llama-bench</code> defaults to <code>ngl=99</code> (all layers on GPU) when no
+      <code>-ngl</code> flag is specified. The Phase 7 bench command did not include <code>-ngl</code>,
+      so all decode was routed to the Vulkan backend. Running the exact same command today produces
+      44.09 t/s with <code>ngl=99, backend=Vulkan,XDNA</code> visible in output &mdash; matching the
+      Phase 7 number.
+    </p>
+
+    <p style="font-size: 0.87rem; color: var(--muted); margin-bottom: 0.5rem;">
+      The <code>GGML_VK_DISABLE=1</code> confirmation test was also invalid &mdash; that env var does
+      not disable the Vulkan backend in this build (confirmed in Phase 9: results are identical with
+      and without it).
+    </p>
+
+    <p style="font-size: 0.87rem; color: var(--muted); margin-bottom: 0.65rem;">
+      <strong style="color: var(--text);">Actual NPU decode via XDNA: 0.65 t/s</strong> &mdash;
+      physics-limited by 8 MB DMA copy overhead per dispatch
+      (~1155 &micro;s &times; 704 dispatches = 813 ms/token &rarr; max ~1.2 t/s).
+    </p>
+
+    <p style="font-size: 0.87rem; color: var(--muted); margin-bottom: 0.65rem;">
+      Phase 7 also broke Phase 6 NPU prefill by replacing all 4 xclbin slots with decode-optimised
+      kernels (<code>TILE_N=64</code>) and setting <code>MIN_N=MAX_N=1</code> in .zshrc.
+    </p>
+
+    <p style="font-size: 0.87rem; color: var(--text); margin-bottom: 0;">
+      <strong>Phase 7's confirmed real achievement:</strong>
+      Vulkan prefill at <strong style="color: var(--green);">930 t/s</strong> &mdash; real, intact,
+      unaffected by this correction. See <a href="phase9.html" style="color: var(--blue); text-decoration: none;">Phase 9</a>
+      for the full investigation.
+    </p>
+  </div>
 
   <!-- Phase 7 -->
   <div class="phase done">

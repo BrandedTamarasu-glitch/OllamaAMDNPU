@@ -225,15 +225,14 @@ All measurements: Meta-Llama-3.1-8B-Instruct Q4_K_M, `llama-bench -r 1 --no-warm
 | NPU 1-col (Phase 5, ub=512) | 10.2 t/s | 12.9 t/s | 11.7 t/s | 8.9 t/s | ~4.1 t/s |
 | NPU 4-col (Phase 6, ub=512) | 13.7 t/s | 19.5 t/s | 16.2 t/s | 10.9 t/s | ~4.1 t/s |
 | Vulkan iGPU (KHR_coopmat, ngl=99) | 833 t/s | 783 t/s | 696 t/s | 609 t/s | ~43 t/s |
-| **Phase 7: Vulkan prefill + NPU decode** | **930 t/s** | — | — | — | **42 t/s** |
+| **Phase 7: Vulkan prefill + Vulkan decode** ¹ | **930 t/s** | — | — | — | **44 t/s** |
+| NPU 4-col prefill (Phase 9 restored) | **12.2 t/s** | **18.4 t/s** | — | — | **0.65 t/s** ² |
 
 Notes:
-- **Phase 7**: Vulkan handles prefill (930 t/s pp512), NPU handles decode (42 t/s) — confirmed NPU-only decode by disabling Vulkan (42.90 t/s unchanged)
-- **Phase 7 decode: +11× vs CPU baseline** (42 t/s vs 3.76 t/s CPU-only decode)
-- NPU decode speed is equivalent to Vulkan decode (~43 t/s) but uses dedicated XDNA2 silicon, leaving the iGPU free for other workloads
-- `MIN_N=1, MAX_N=1` enables NPU-decode-only mode; Vulkan takes all prefill ops (N>1 falls outside NPU range)
-- **Phase 6 (4-col NPU, TILE_N=256)**: +35–51% prefill vs Phase 5 — uses all 4 AIE columns in parallel
-- **NPU prefill is 3–5× faster than CPU** at all context lengths; peak at pp=2048 (19.5 t/s, full tile utilisation)
+- ¹ **Phase 7 decode correction (Phase 9):** The Phase 7 docs claimed 43.84 t/s NPU decode. This was Vulkan decode — `llama-bench` defaults to `ngl=99`, routing all decode to the GPU. The `GGML_VK_DISABLE=1` confirmation was also invalid (that env var does not disable Vulkan in this build). Phase 7's genuine achievement is Vulkan prefill at 930 t/s, which is real and confirmed. See [Phase 9 changelog](docs/xdna-npu/phase9.html).
+- ² **NPU decode (XDNA-only) is 0.65 t/s** — physics-limited by 8 MB DMA copy overhead per dispatch (~1155 µs × 704 dispatches/token). Reaching ~15 t/s on NPU requires pre-loading weight tiles at model init (Phase 10 target).
+- **Phase 6 (4-col NPU, TILE_N=256)**: +35–51% prefill vs Phase 5 — uses all 4 AIE columns in parallel; restored in Phase 9
+- **NPU prefill is 3–5× faster than CPU** at all context lengths; peak around pp=160–2048 where tile utilisation is highest
 - NPU prefill degrades at long context because attention score matmuls (K=seq_len, variable) fall back to CPU; only fixed-K projection matmuls offload to NPU
 - Vulkan degrades ~27% from 512→8192 tokens; NPU 4-col degrades ~21% (more context-resilient than GPU)
 - 8k context validated without OOM (KV cache ≈ 1 GiB; model ≈ 4.6 GiB; 30 GiB RAM is sufficient)
@@ -244,11 +243,11 @@ Notes:
 |---------|---------|--------|-----------|-----------------|
 | NPU 4-col (Phase 6) | 32.7 t/s | 3.6 t/s | 58.5 W | 16.2 J/tok |
 | Vulkan | 632 t/s | 41.6 t/s | 52.2 W | 1.3 J/tok |
-| **Phase 7 (NPU decode + Vulkan prefill)** | **930 t/s** | **43.84 t/s** | **41.51 W** | **0.947 J/tok** |
+| Phase 7 (Vulkan prefill + Vulkan decode) ¹ | **930 t/s** | **43.84 t/s** | **41.51 W** | **0.947 J/tok** |
 
 Notes:
-- **Phase 7 beats Vulkan** on both decode speed (43.84 vs 41.6 t/s) and energy efficiency (0.947 vs 1.3 J/tok) — dedicated XDNA2 silicon draws less power than the iGPU at decode
-- **Phase 7 vs Phase 6 decode**: 43.84 t/s vs 3.76 t/s (+11.7×), 0.947 vs 16.2 J/tok (−94%)
+- ¹ Phase 7 power numbers reflect Vulkan decode, not NPU decode (see correction above). The 41.51 W and 0.947 J/tok are real Vulkan measurements.
+- **Vulkan vs Phase 6 NPU decode**: 43.84 t/s vs 3.76 t/s (+11.7×) — this is Vulkan iGPU vs CPU decode, not NPU vs CPU
 - **4-col NPU draws more power** than Phase 5 1-col (58.5 W vs 45.8 W) — all 4 AIE columns active
 - **Decode does not use the NPU in Phase 6** (M=1 per token, no xclbin covers it) — higher idle NPU power worsens J/tok vs Phase 5
 
@@ -272,14 +271,17 @@ Notes:
 | 4 | ✅ Done | Workload-isolation characterisation — power measurement vs Vulkan; NPU confirmed as non-competing backend (dedicated XDNA2 silicon); `bench-power.sh` tooling |
 | 5 | ✅ Done | Long context (8k–32k) — validated at 8k with 30 GiB RAM; NPU 2–3× over CPU; peaks at pp=2048; attention falls to CPU at long context (variable-K not covered by xclbins); `bench-context.sh` tooling |
 | 6 | ✅ Done | Multi-core NPU (4-col, TILE_N=256) — 4× AIE column parallelism; peak pp=2048: 19.5 t/s (+51% vs Phase 5); all 4 K-slots upgraded to 4-col xclbins |
-| 7 | ✅ Done | NPU decode acceleration (TILE_N=64) — decode xclbins (n=16 minimum per AIE constraint); MIN_N=1, MAX_N=1 routes N=1 decode to NPU, prefill to Vulkan; decode 42 t/s (+11× vs CPU); prefill 930 t/s via Vulkan |
-| 8 | ✅ Done | Performance ceiling investigation — batch sweep flat at 43.7 t/s (8A); int4 double-quant ruled out (SNR 44.8→19.7 dB), cascade ruled out by AMD docs (8B); speculative decoding with Llama-3.2-1B (44% accept, 212 t/s draft) yields no net gain (8C); **43.7 t/s is the LPDDR5 bandwidth ceiling** |
+| 7 | ⚠️ Corrected | Vulkan prefill (930 t/s) + decode xclbin work — **the claimed 43.84 t/s NPU decode was Vulkan decode** (llama-bench ngl=99 default). Genuine achievement: Vulkan prefill at 930 t/s. NPU decode xclbins built but not viable at current dispatch cost (~0.65 t/s actual). Phase 7 also inadvertently broke Phase 6 NPU prefill by replacing all xclbins and setting MIN_N=MAX_N=1. |
+| 8 | ✅ Done | Vulkan decode ceiling investigation — batch sweep flat at 43.7 t/s; int4 ruled out (SNR 44.8→19.7 dB); cascade ruled out; speculative decoding (44% accept, 212 t/s draft) yields no net gain; **43.7 t/s is the LPDDR5 bandwidth ceiling for Vulkan decode** |
+| 9 | ✅ Done | Root cause investigation — Phase 7 misattribution confirmed; Phase 6 NPU prefill restored (12.2 t/s pp512, 18.4 t/s pp160); dispatch timing overhead removed; corrected baselines documented |
 
 ---
 
 ## Performance Ceiling (Phase 8 findings)
 
-**43.7 t/s decode is the hard ceiling** for this hardware+model. All software-level techniques were exhausted:
+> **Note (Phase 9):** The 43.7 t/s baseline in this section is **Vulkan decode** (ngl=99), not NPU decode. The ceiling analysis and conclusions below are correct for Vulkan decode on this hardware.
+
+**43.7 t/s Vulkan decode is the hard ceiling** for this hardware+model. All software-level techniques were exhausted:
 
 | Approach | Result | Reason |
 |----------|--------|--------|

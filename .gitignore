@@ -144,3 +144,8 @@ poetry.toml
 # emscripten
 a.out.*
 .review-squad/
+
+# Local session files
+.claude/
+.worktrees/
+1export

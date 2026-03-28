@@ -124,11 +124,6 @@ struct ggml_backend_xdna_context {
         int64_t tile_n = 32;
         bool    ready  = false;
 
-        // Dispatch timing — tracks wall-clock latency of each dispatch_tile call
-        // (DMA in + kernel + DMA out).  Used to log break-even min_batch so the
-        // caller can calibrate GGML_XDNA_MIN_BATCH with real measurements.
-        uint64_t dispatch_count   = 0;  // total calls
-        double   dispatch_us_sum  = 0;  // cumulative wall-clock µs (all dispatches)
     };
     XclbinSlot slots[MAX_SLOTS];
 
@@ -269,8 +264,6 @@ static bool dispatch_tile(ggml_backend_xdna_context * ctx,
     const int64_t tk = s.tile_k;
     const int64_t tn = s.tile_n;
 
-    const auto t0 = std::chrono::steady_clock::now();
-
     std::memcpy(bo_a.map<int8_t *>(), a_tile, (size_t)tm * tk * sizeof(int8_t));
     std::memcpy(bo_b.map<int8_t *>(), b_tile, (size_t)tk * tn * sizeof(int8_t));
 
@@ -293,37 +286,6 @@ static bool dispatch_tile(ggml_backend_xdna_context * ctx,
     bo_c.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
     // kernel always fully overwrites bo_c (never accumulates); safe to read directly.
     std::memcpy(c_tile, bo_c.map<const int32_t *>(), (size_t)tm * tn * sizeof(int32_t));
-
-    // --- Timing ---
-    const double elapsed_us = std::chrono::duration<double, std::micro>(
-        std::chrono::steady_clock::now() - t0).count();
-    s.dispatch_count++;
-    s.dispatch_us_sum += elapsed_us;
-
-    // Log on first dispatch, first 10 dispatches, then every 1000.
-    // Emits per-dispatch latency + the min_batch break-even vs a reference
-    // CPU throughput of 200 GFLOPS/s (conservative; real CPUs are 100–500).
-    // Tune GGML_XDNA_MIN_BATCH to the logged break-even to permanently
-    // prevent dispatches where NPU overhead exceeds compute savings.
-    const uint64_t cnt = s.dispatch_count;
-    if (cnt <= 10 || cnt % 1000 == 0) {
-        const double avg_us   = s.dispatch_us_sum / (double)cnt;
-        const double tile_ops = 2.0 * (double)tm * (double)tk * (double)tn; // 2*M*K*N MACs
-        const double tops     = tile_ops / (elapsed_us * 1e-6) / 1e12;
-        // break-even: dispatch_overhead_s * cpu_gflops * 1e9 = min_batch ops
-        // Using avg latency as proxy for overhead at this tile size.
-        // Calibrated from llama-bench tg20 CPU-only on Llama-3.1-8B-Q4_K_M: 3.76 t/s × 14 GFLOPs/tok
-        const double cpu_gflops    = 52.6;
-        const double breakeven_ops = avg_us * 1e-6 * cpu_gflops * 1e9;
-        GGML_LOG_INFO("ggml_xdna: slot %d [%lld×%lld×%lld] dispatch #%llu: "
-                      "%.1f µs  %.2f TOPS  avg %.1f µs  "
-                      "break-even min_batch ~%.0f (at %.0f CPU GFLOPS/s)\n",
-                      slot_idx,
-                      (long long)tm, (long long)tk, (long long)tn,
-                      (unsigned long long)cnt,
-                      elapsed_us, tops, avg_us,
-                      breakeven_ops, cpu_gflops);
-    }
 
     return true;
 }
