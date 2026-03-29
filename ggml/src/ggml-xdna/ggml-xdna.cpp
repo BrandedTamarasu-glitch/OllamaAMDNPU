@@ -75,6 +75,7 @@
 #include "ggml-xdna-quant.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -95,9 +96,11 @@
 static int64_t xdna_env_int(const char * name, int64_t def, int64_t max_val) {
     const char * v = std::getenv(name);
     if (!v) { return def; }
-    const int64_t val = std::atoll(v);
-    if (val <= 0 || val > max_val) {
-        GGML_LOG_WARN("ggml_xdna: %s=%s is out of range (1–%lld), "
+    char * endptr = nullptr;
+    errno = 0;
+    const int64_t val = std::strtoll(v, &endptr, 10);
+    if (errno != 0 || endptr == v || *endptr != '\0' || val <= 0 || val > max_val) {
+        GGML_LOG_WARN("ggml_xdna: %s=%s is invalid or out of range (1–%lld), "
                       "using default %lld\n",
                       name, v, (long long)max_val, (long long)def);
         return def;
@@ -278,8 +281,11 @@ static bool dispatch_tile(ggml_backend_xdna_context * ctx,
     const ert_cmd_state run_state = run.wait(std::chrono::milliseconds(ctx->timeout_ms));
     if (run_state != ERT_CMD_STATE_COMPLETED) {
         GGML_LOG_ERROR("ggml_xdna: NPU kernel dispatch failed (state=%d) — "
-                       "returning GGML_STATUS_FAILED to caller\n",
+                       "disabling NPU and returning GGML_STATUS_FAILED\n",
                        static_cast<int>(run_state));
+        // Prevent further dispatches on a potentially wedged NPU — subsequent
+        // ops will fall back to CPU via supports_op() returning false.
+        ctx->kernel_ready = false;
         return false;
     }
 
@@ -324,6 +330,14 @@ static bool ggml_backend_xdna_mul_mat(ggml_backend_xdna_context * ctx,
     const int64_t tn = sl.tile_n;
 
     // --- Weight cache: quantise src0 once per unique tensor, reuse on every token ---
+    // Double quantisation is intentional: AIE kernels accept only int8, so Q4_K_M (or
+    // any ggml format) must be dequantised to F32 then re-quantised to symmetric int8
+    // with per-row scales.  This is the standard approach for NPU backends without
+    // native int4 kernel support.  Quality impact is measurable but acceptable.
+    //
+    // Cache key: src0->data pointer identity (stable for mmap'd model weights).
+    // Assumption: pointer content does not change at the same (M, K) dimensions.
+    // This would fail for in-place LoRA or model hot-reload at the same address.
     // Invalidate stale entry if the same pointer is reused for different dimensions.
     {
         auto stale = ctx->weight_cache.find(src0->data);
@@ -728,8 +742,10 @@ static bool try_init_context(ggml_backend_xdna_context * ctx) {
         const char * kv = std::getenv(tile_k_vars[i]);
         if (!xp || !ip || !kv) { continue; }
 
-        const int64_t k = std::atoll(kv);
-        if (k <= 0) {
+        char * kv_end = nullptr;
+        errno = 0;
+        const int64_t k = std::strtoll(kv, &kv_end, 10);
+        if (errno != 0 || kv_end == kv || *kv_end != '\0' || k <= 0) {
             GGML_LOG_WARN("ggml_xdna: %s=%s invalid — skipping slot %d\n",
                           tile_k_vars[i], kv, i + 1);
             continue;

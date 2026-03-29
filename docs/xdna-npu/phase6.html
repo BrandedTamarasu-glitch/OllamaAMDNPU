@@ -72,8 +72,8 @@
 
   <div class="card">
     <h2>Column resource constraint (discovered)</h2>
-    <p>The NPU5 (Strix Halo) has <strong>16 AIE columns</strong> and a driver-enforced <code>hwctx_limit=16</code>. Each 4-col xclbin occupies 4 columns, so a maximum of <strong>4 simultaneous hw_contexts</strong> can be loaded (4 × 4 = 16 columns).</p>
-    <p>Attempting to load 8 slots (8 × 4-col = 32 columns) exceeded the physical column count — all NPU dispatches silently fell through to CPU. This set the 4-slot ceiling for all subsequent phases.</p>
+    <p>The NPU (Strix Halo, mlir-aie device <code>npu2</code>) has <strong>8 physical AIE columns</strong> and a driver-enforced <code>hwctx_limit=16</code> concurrent contexts. Each 4-col xclbin occupies 4 columns, so a maximum of <strong>2 partitions can execute simultaneously</strong> on the 8-column array (2 × 4 = 8 columns).</p>
+    <p>Attempting to load 8 slots (8 × 4-col = 32 columns) exceeded the physical column count — all NPU dispatches silently fell through to CPU. This set the 4-slot ceiling for all subsequent phases. (The serialised dispatch via <code>dispatch_mutex</code> means only one slot dispatches at a time, so 4 slots with 4 columns each is viable despite exceeding the 8-column physical limit — XRT time-shares the columns across hw_contexts.)</p>
   </div>
 
   <div class="card">

@@ -5,19 +5,19 @@
 
 find_path(XRT_INCLUDE_DIR
     NAMES xrt/xrt_device.h
-    HINTS /usr/include /usr/local/include)
+    HINTS /usr/include /usr/local/include $ENV{XILINX_XRT}/include)
 
 find_library(XRT_CORE_LIB
     NAMES xrt_core
-    HINTS /usr/lib /usr/local/lib)
+    HINTS /usr/lib /usr/local/lib $ENV{XILINX_XRT}/lib)
 
 find_library(XRT_COREUTIL_LIB
     NAMES xrt_coreutil
-    HINTS /usr/lib /usr/local/lib)
+    HINTS /usr/lib /usr/local/lib $ENV{XILINX_XRT}/lib)
 
 find_library(XRT_DRIVER_XDNA_LIB
     NAMES xrt_driver_xdna
-    HINTS /usr/lib /usr/local/lib)
+    HINTS /usr/lib /usr/local/lib $ENV{XILINX_XRT}/lib)
 # xrt-plugin-amdxdna ships only the versioned .so.2 without an unversioned
 # symlink on some distros (e.g. CachyOS).  Fall back to the versioned name.
 if (NOT XRT_DRIVER_XDNA_LIB)
@@ -28,7 +28,7 @@ endif()
 
 find_library(XRT_CPP_LIB
     NAMES xrt++
-    HINTS /usr/lib /usr/local/lib)
+    HINTS /usr/lib /usr/local/lib $ENV{XILINX_XRT}/lib)
 
 if (XRT_INCLUDE_DIR AND XRT_CORE_LIB AND XRT_COREUTIL_LIB AND XRT_CPP_LIB AND XRT_DRIVER_XDNA_LIB)
     set(XRT_LIBRARIES

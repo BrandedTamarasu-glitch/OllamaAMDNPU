@@ -16,7 +16,19 @@
 
 set -euo pipefail
 
-POWER_FILE=/sys/class/hwmon/hwmon3/power1_input
+# Auto-detect the amdgpu hwmon directory (index can shift across boots).
+POWER_FILE=""
+for hwmon_dir in /sys/class/hwmon/hwmon*; do
+    if [[ -f "$hwmon_dir/name" ]] && grep -q amdgpu "$hwmon_dir/name" 2>/dev/null; then
+        if [[ -f "$hwmon_dir/power1_input" ]]; then
+            POWER_FILE="$hwmon_dir/power1_input"
+            break
+        fi
+    fi
+done
+if [[ -z "$POWER_FILE" ]]; then
+    POWER_FILE=/sys/class/hwmon/hwmon3/power1_input  # fallback
+fi
 MODEL=${MODEL:-models/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf}
 PP_TOKENS=${PP_TOKENS:-160}   # simulated prompt tokens for llama-bench
 TG_TOKENS=${TG_TOKENS:-30}    # decode tokens for llama-bench

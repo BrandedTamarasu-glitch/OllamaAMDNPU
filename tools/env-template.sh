@@ -17,10 +17,12 @@
 #   the slot whose TILE_K matches the current matmul. Matmuls with no matching slot
 #   fall back to CPU automatically — this is expected behaviour.
 #
-# PHASE 7 MODE (NPU decode + Vulkan prefill) — RECOMMENDED:
+# PHASE 7 MODE (NPU decode + Vulkan prefill):
 #   - MIN_N=1, MAX_N=1: NPU handles only N=1 (single-token decode)
 #   - All prefill ops (N>1) route to Vulkan automatically (~930 t/s pp512)
-#   - NPU decode: ~42 t/s (+11× vs CPU baseline of 3.76 t/s)
+#   - NPU decode: ~0.65 t/s (DMA-limited; Phase 10 targets ~15 t/s via BO pre-staging)
+#   - NOTE: Phase 7 originally claimed ~42 t/s — that was Vulkan decode (ngl=99 default).
+#     See Phase 9 correction for details.
 #   - xclbins: TILE_N=64 decode kernels (n_aie_cols=4)
 #
 # PHASE 6 MODE (NPU prefill only) — NPU handles prefill, CPU handles decode:
