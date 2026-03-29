@@ -121,7 +121,7 @@ struct ggml_backend_xdna_context {
         std::unique_ptr<xrt::kernel>     kernel;
         std::vector<uint32_t>            instr_data;
         xrt::bo                          bo_instr;
-        xrt::bo                          bo_a, bo_b, bo_c, bo_tmp, bo_trace;
+        xrt::bo                          bo_b, bo_c, bo_tmp, bo_trace;
         int64_t tile_m = 32;
         int64_t tile_k = 0;   // 0 = slot disabled
         int64_t tile_n = 32;
@@ -157,6 +157,12 @@ struct ggml_backend_xdna_context {
         std::vector<float>  scales;  // [M]   per-row scales
         int64_t cached_m = 0;        // M at quantisation time (for invalidation)
         int64_t cached_k = 0;        // K at quantisation time (for invalidation)
+
+        // Pre-staged XRT BOs: one per (slot_idx, tile_row_index).
+        // key   = ((uint64_t)slot_idx << 32) | (uint64_t)(m0 / tile_m)
+        // value = host_only xrt::bo, memcpy'd and sync'd once at first use.
+        // Destroyed automatically when this entry is erased (M/K dimension change).
+        std::unordered_map<uint64_t, xrt::bo> tile_bos;
     };
     std::unordered_map<const void *, WeightEntry> weight_cache;
 
@@ -249,34 +255,32 @@ static std::vector<uint32_t> load_instr_file(const std::string & path) {
 // Returns true on success, false on NPU timeout or hardware fault.
 // Callers must propagate failure up to graph_compute as GGML_STATUS_FAILED.
 static bool dispatch_tile(ggml_backend_xdna_context * ctx,
-                          const int8_t * a_tile,
+                          xrt::bo      & bo_a_staged,
                           const int8_t * b_tile,
                           int32_t      * c_tile,
                           int           slot_idx) {
     auto & s          = ctx->slots[slot_idx];
     auto & kern       = *s.kernel;
     auto & instr      = s.bo_instr;
-    auto & bo_a       = s.bo_a;
     auto & bo_b       = s.bo_b;
     auto & bo_c       = s.bo_c;
     auto & bo_tmp     = s.bo_tmp;
     auto & bo_trace   = s.bo_trace;
     auto & instr_data = s.instr_data;
 
-    const int64_t tm = s.tile_m;
+    const int64_t tm = s.tile_m;   // still needed for bo_c memcpy in function tail
     const int64_t tk = s.tile_k;
     const int64_t tn = s.tile_n;
 
-    std::memcpy(bo_a.map<int8_t *>(), a_tile, (size_t)tm * tk * sizeof(int8_t));
+    // bo_a_staged is pre-staged (memcpy + sync done once at cache-miss time).
+    // Only bo_b (activations) changes per token — copy and sync it here.
     std::memcpy(bo_b.map<int8_t *>(), b_tile, (size_t)tk * tn * sizeof(int8_t));
-
-    bo_a.sync(XCL_BO_SYNC_BO_TO_DEVICE);
     bo_b.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
     constexpr unsigned int opcode = 3;
     auto run = kern(opcode, instr,
                     static_cast<uint32_t>(instr_data.size()), // safe: load_instr_file enforces 4 MB / 4 = 1M word limit
-                    bo_a, bo_b, bo_c, bo_tmp, bo_trace);
+                    bo_a_staged, bo_b, bo_c, bo_tmp, bo_trace);
     // env_int enforces val > 0, so timeout_ms is always >= 1 after construction.
     const ert_cmd_state run_state = run.wait(std::chrono::milliseconds(ctx->timeout_ms));
     if (run_state != ERT_CMD_STATE_COMPLETED) {
@@ -404,6 +408,9 @@ static bool ggml_backend_xdna_mul_mat(ggml_backend_xdna_context * ctx,
 
     float * out = (float *) dst->data;
 
+    // Report tile_bos cache stats once after the first token populates it.
+    static bool bo_stats_logged = false;
+
     // Tile over N (outer) then M (inner).
     // tile_b depends only on n0, so it is computed once per n0 iteration rather
     // than once per (m0, n0) pair — avoids redundant K×tn transpose work when
@@ -422,17 +429,30 @@ static bool ggml_backend_xdna_mul_mat(ggml_backend_xdna_context * ctx,
         }
 
         for (int64_t m0 = 0; m0 < M; m0 += tm) {
-            // Fill tile_a from cached qa[m0:m0+tm, 0:K].
-            // Zero-fill partial tiles only; full tiles (m0+tm <= M) have all tm rows
-            // written by the memcpy loop below (K bytes each), so pre-clearing would be redundant.
-            if ((m0 + tm) > M) { std::fill(ctx->tile_a.begin(), ctx->tile_a.end(), 0); }
-            for (int64_t mi = 0; mi < tm && (m0 + mi) < M; mi++) {
-                std::memcpy(ctx->tile_a.data() + mi * tk,
-                            qa + (m0 + mi) * K,
-                            K); // K == tk (supports_op guarantee)
+            // Cache key encodes both slot and tile row to handle multi-slot setups.
+            const uint64_t tile_key = ((uint64_t)slot_idx << 32) |
+                                      (uint64_t)(m0 / tm);
+            auto it = entry.tile_bos.find(tile_key);
+            if (it == entry.tile_bos.end()) {
+                // Cache miss (first token): fill tile_a, allocate BO, memcpy + sync once.
+                if ((m0 + tm) > M) { std::fill(ctx->tile_a.begin(), ctx->tile_a.end(), 0); }
+                for (int64_t mi = 0; mi < tm && (m0 + mi) < M; mi++) {
+                    std::memcpy(ctx->tile_a.data() + mi * tk,
+                                qa + (m0 + mi) * K,
+                                K); // K == tk (supports_op guarantee)
+                }
+                xrt::bo new_bo(ctx->device,
+                               (size_t)tm * tk * sizeof(int8_t),
+                               xrt::bo::flags::host_only,
+                               sl.kernel->group_id(3));
+                std::memcpy(new_bo.map<int8_t *>(), ctx->tile_a.data(), (size_t)tm * tk);
+                new_bo.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+                auto [ins_it, _] = entry.tile_bos.emplace(tile_key, std::move(new_bo));
+                it = ins_it;
             }
+            // Cache hit: bo is pre-staged — no tile_a fill, no memcpy, no sync.
 
-            if (!dispatch_tile(ctx, ctx->tile_a.data(), ctx->tile_b.data(), ctx->tile_c.data(), slot_idx)) {
+            if (!dispatch_tile(ctx, it->second, ctx->tile_b.data(), ctx->tile_c.data(), slot_idx)) {
                 return false;
             }
 
@@ -447,6 +467,27 @@ static bool ggml_backend_xdna_mul_mat(ggml_backend_xdna_context * ctx,
             }
         }
     }
+
+    // One-shot log: report aggregate tile_bos cache size after first population pass.
+    if (!bo_stats_logged && !entry.tile_bos.empty()) {
+        size_t total_bos = 0;
+        size_t total_bytes = 0;
+        for (const auto & [ptr, we] : ctx->weight_cache) {
+            total_bos += we.tile_bos.size();
+            for (const auto & [key, bo] : we.tile_bos) {
+                const int si = static_cast<int>(key >> 32);
+                if (si >= 0 && si < ggml_backend_xdna_context::MAX_SLOTS && ctx->slots[si].ready) {
+                    total_bytes += (size_t)ctx->slots[si].tile_m * ctx->slots[si].tile_k;
+                }
+            }
+        }
+        if (total_bos > 0) {
+            GGML_LOG_INFO("ggml_xdna: tile_bos cache: %zu BOs, %.1f MB host memory\n",
+                          total_bos, (double)total_bytes / (1024.0 * 1024.0));
+            bo_stats_logged = true;
+        }
+    }
+
     return true;
 }
 
@@ -680,8 +721,9 @@ static bool try_init_context(ggml_backend_xdna_context * ctx) {
         sl.bo_instr.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
         auto & kern = *sl.kernel;
-        sl.bo_a   = xrt::bo(ctx->device, (size_t)sl.tile_m * sl.tile_k * sizeof(int8_t),
-                             xrt::bo::flags::host_only, kern.group_id(3));
+        // bo_a is NOT pre-allocated here — weight tiles are pre-staged lazily
+        // into WeightEntry::tile_bos on first use (Phase 10 BO cache).
+        // group_id(3) is used at cache-miss time to allocate per-tile BOs.
         sl.bo_b   = xrt::bo(ctx->device, (size_t)sl.tile_k * sl.tile_n * sizeof(int8_t),
                              xrt::bo::flags::host_only, kern.group_id(4));
         sl.bo_c   = xrt::bo(ctx->device, (size_t)sl.tile_m * sl.tile_n * sizeof(int32_t),
