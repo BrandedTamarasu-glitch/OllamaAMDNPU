@@ -149,3 +149,8 @@ a.out.*
 .claude/
 .worktrees/
 1export
+
+# Phase 13-16 generated artifacts
+trace-output/
+tools/sweep/sweep-results.csv
+xclbin-chess/
