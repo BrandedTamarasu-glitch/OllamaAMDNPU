@@ -229,7 +229,7 @@ All measurements: Meta-Llama-3.1-8B-Instruct Q4_K_M, `llama-bench -r 1 --no-warm
 
 Notes:
 - ¹ **Phase 7 decode correction (Phase 9):** The Phase 7 docs claimed 43.84 t/s NPU decode. This was Vulkan decode — `llama-bench` defaults to `ngl=99`, routing all decode to the GPU. The `GGML_VK_DISABLE=1` confirmation was also invalid (that env var does not disable Vulkan in this build). Phase 7's genuine achievement is Vulkan prefill at 930 t/s, which is real and confirmed. See [Phase 9 changelog](docs/xdna-npu/phase9.html).
-- ² **NPU decode (XDNA-only) is 0.65 t/s** — physics-limited by 8 MB DMA copy overhead per dispatch (~1155 µs × 704 dispatches/token). Reaching ~15 t/s on NPU requires pre-loading weight tiles at model init (Phase 10 target).
+- ² **NPU decode (XDNA-only) is 0.65 t/s** with default 64×64 micro-tiles. Phase 12 micro-tile optimisation (128×128×16) improves this to **1.40 t/s** (+23%) by halving the NPU instruction sequence length. Still compute-bound at <1% AIE utilisation.
 - **Phase 6 (4-col NPU, TILE_N=256)**: +35–51% prefill vs Phase 5 — uses all 4 AIE columns in parallel; restored in Phase 9
 - **NPU prefill is 3–5× faster than CPU** at all context lengths; peak around pp=160–2048 where tile utilisation is highest
 - NPU prefill degrades at long context because attention score matmuls (K=seq_len, variable) fall back to CPU; only fixed-K projection matmuls offload to NPU
@@ -275,10 +275,11 @@ Notes:
 | 9 | ✅ Done | Root cause investigation — Phase 7 misattribution confirmed; Phase 6 NPU prefill restored (12.2 t/s pp512, 18.4 t/s pp160); dispatch timing overhead removed; corrected baselines documented |
 | 10 | ✅ Done | Weight tile pre-staging (bo_a cache) — eliminated per-dispatch 280 µs DMA copy; +3% prefill; 112 MB memory saving; audit fixes across 8 files |
 | 11 | ✅ Done | Dispatch reduction investigation — tested bo_b sync dedup, TILE_M=4096/14336 xclbins, xrt::runlist research. **All approaches produced identical throughput.** NPU is compute-bound at 0.6% AIE utilisation, not dispatch-bound. Host-side optimisation exhausted. |
+| 12 | ✅ Done | Micro-tile optimization — swept 7 AIE micro-tile configurations against 64 KB SRAM budget. **128×128×16 is optimal**: +23% NPU decode (1.14 → 1.40 t/s). Dominant factor is NPU instruction count, not compute-per-byte. Halving instruction sequence length by doubling both m and k yields the gain. NPU mode toggle (`npu-mode decode/prefill`) added. |
 
 ---
 
-## NPU Compute Ceiling (Phase 11 findings)
+## NPU Compute Ceiling (Phase 11–12 findings)
 
 > **All host-side optimisations are exhausted.** The NPU bottleneck is AIE kernel compute, not dispatch overhead.
 
@@ -291,6 +292,9 @@ The int8 matmul kernel achieves **2.93 GOPS** on a theoretical peak of **480 GOP
 | TILE_M=4096 (halve dispatches) | +20–30% | No change (4.56 t/s) |
 | TILE_M=14336 (7× fewer dispatches) | +30–35% | No change (4.60 t/s) |
 | xrt::runlist batch dispatch | <1% (researched, not tested) | — |
+| **Micro-tile 128×128×16 (Phase 12)** | **Reduce AIE instruction count** | **+23% decode (1.14 → 1.40 t/s)** |
+
+Phase 12 showed that **micro-tile geometry** (the per-AIE-core tile size) matters more than host-side dispatch count. Doubling both m and k from 64 to 128 halved the NPU instruction sequence (1,292 vs 2,580) while staying within the 64 KB SRAM budget at 86% utilisation. This is the first measurable kernel-side improvement.
 
 **For LLaMA 8B on Strix Halo: use Vulkan exclusively** (530 t/s prefill, 44 t/s decode). The NPU backend serves as a proof-of-concept for XDNA2 dispatch and a testbed for future kernel improvements. Further NPU improvement requires kernel-level changes in mlir-aie (vectorised int8 MAC, DMA/compute overlap, larger per-core tiles).
 

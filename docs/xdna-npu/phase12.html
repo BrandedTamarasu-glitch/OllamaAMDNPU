@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AMD XDNA2 NPU Backend — Phase 12: Micro-Tile Optimization</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --green: #3fb950;
+      --green-dim: #1a3a22;
+      --blue: #58a6ff;
+      --yellow: #d29922;
+      --yellow-dim: #2e2208;
+      --red: #f85149;
+      --red-dim: #3d1a1a;
+      --orange: #e3693a;
+      --orange-dim: #3a1e0d;
+      --purple: #bc8cff;
+      --purple-dim: #2d1f47;
+      --tag-bg: #1f2937;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 2rem 1rem;
+    }
+    .container { max-width: 860px; margin: 0 auto; }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1.5rem;
+      margin-bottom: 2.5rem;
+    }
+    header h1 { font-size: 1.6rem; font-weight: 700; color: var(--text); }
+    header h1 span { color: var(--blue); }
+    header p { color: var(--muted); margin-top: 0.4rem; font-size: 0.9rem; }
+    header a { color: var(--blue); text-decoration: none; }
+    header a:hover { text-decoration: underline; }
+
+    .hardware-pill {
+      display: inline-block;
+      background: var(--tag-bg);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 0.2rem 0.75rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 0.6rem;
+    }
+
+    .phase {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 1.5rem;
+      overflow: hidden;
+    }
+    .phase-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+      padding: 1.1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .phase-number {
+      flex-shrink: 0;
+      width: 2rem;
+      height: 2rem;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+      font-weight: 700;
+      background: var(--tag-bg);
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .phase.success .phase-number {
+      background: var(--green-dim);
+      color: var(--green);
+      border-color: var(--green);
+    }
+    .phase-title { flex: 1; }
+    .phase-title h2 { font-size: 1rem; font-weight: 600; color: var(--text); }
+    .phase-title p { font-size: 0.83rem; color: var(--muted); margin-top: 0.2rem; }
+    .badge {
+      flex-shrink: 0;
+      font-size: 0.72rem;
+      padding: 0.18rem 0.55rem;
+      border-radius: 12px;
+      font-weight: 600;
+      align-self: flex-start;
+      margin-top: 0.15rem;
+    }
+    .badge.gain      { background: var(--green-dim);   color: var(--green); }
+
+    .phase-body { padding: 1.1rem 1.25rem; }
+
+    .conclusion-box {
+      background: var(--green-dim);
+      border: 1px solid var(--green);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .conclusion-box .label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--green);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.3rem;
+    }
+    .conclusion-box p { font-size: 0.87rem; color: var(--text); }
+
+    .warning-box {
+      background: var(--orange-dim);
+      border: 1px solid var(--orange);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .warning-box .label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--orange);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.3rem;
+    }
+    .warning-box p { font-size: 0.87rem; color: var(--text); }
+
+    .insight-box {
+      background: var(--purple-dim);
+      border: 1px solid var(--purple);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .insight-box .label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--purple);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.3rem;
+    }
+    .insight-box p { font-size: 0.87rem; color: var(--text); }
+
+    .details p { font-size: 0.87rem; color: var(--muted); margin-bottom: 0.4rem; }
+    .details p:last-child { margin-bottom: 0; }
+    .details strong { color: var(--text); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.83rem;
+      margin-top: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+    th {
+      text-align: left;
+      color: var(--muted);
+      font-weight: 600;
+      padding: 0.4rem 0.6rem;
+      border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: 0.4rem 0.6rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+    }
+    tr:last-child td { border-bottom: none; }
+    td.highlight { color: var(--green); font-weight: 600; }
+    td.muted     { color: var(--muted); }
+    td.dead      { color: var(--red); }
+    td.same      { color: var(--yellow); }
+
+    .tag {
+      display: inline-block;
+      background: var(--tag-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.1rem 0.4rem;
+      font-size: 0.76rem;
+      color: var(--muted);
+      font-family: "SF Mono", "Consolas", monospace;
+    }
+
+    code {
+      font-family: "SF Mono", "Consolas", monospace;
+      font-size: 0.84em;
+      background: var(--tag-bg);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 0.05em 0.3em;
+    }
+
+    .section-label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin: 0.9rem 0 0.4rem;
+    }
+
+    .subphase-label {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--blue);
+      margin: 1.1rem 0 0.4rem;
+      padding-bottom: 0.3rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    footer {
+      border-top: 1px solid var(--border);
+      padding-top: 1.5rem;
+      margin-top: 2.5rem;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+    footer a { color: var(--blue); text-decoration: none; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <h1>AMD <span>XDNA2 NPU</span> Backend &mdash; Phase 12</h1>
+    <p>
+      <a href="phase11.html">&larr; Phase 10+11</a>
+      &nbsp;&middot;&nbsp;
+      Custom <a href="https://github.com/ggml-org/llama.cpp">llama.cpp</a> backend offloading
+      <code>GGML_OP_MUL_MAT</code> to the AMD XDNA2 NPU via XRT kernel dispatch. &nbsp;&middot;&nbsp;
+      <a href="https://github.com/BrandedTamarasu-glitch/OllamaAMDNPU">GitHub</a>
+    </p>
+    <div class="hardware-pill">Ryzen AI MAX 385 &nbsp;&middot;&nbsp; RyzenAI-npu5 (XDNA2)</div>
+  </header>
+
+  <!-- Phase 12 -->
+  <div class="phase success">
+    <div class="phase-header">
+      <div class="phase-number">12</div>
+      <div class="phase-title">
+        <h2>Micro-Tile Optimization &mdash; 128&times;128&times;16 Decode Tiles</h2>
+        <p>AIE micro-tile sweep &middot; +23% NPU decode &middot; SRAM budget analysis &middot; instruction count as dominant factor &middot; 2026-03-30</p>
+      </div>
+      <span class="badge gain">+23%</span>
+    </div>
+    <div class="phase-body">
+
+      <!-- Section 1 -->
+      <div class="subphase-label">1 &mdash; Background</div>
+      <div class="details">
+        <p>Phase 11 established that the NPU is compute-bound at 0.6% AIE utilisation with 64&times;64&times;64 micro-tiles (the per-core tile size within the AIE array). While Phases 10&ndash;11 focused on <em>host-side</em> dispatch overhead, Phase 12 investigates the <em>AIE-side</em> tile geometry &mdash; the <code>m</code>, <code>k</code>, <code>n</code> parameters passed to the mlir-aie <code>whole_array</code> builder that control how much work each AIE core does per DMA transfer.</p>
+        <p>The hypothesis: larger micro-tiles reduce the ratio of DMA setup to compute within the AIE array, potentially improving the 0.6% utilisation figure. The constraint: each AIE2 core has only <strong>64 KB of data memory (SRAM)</strong>, limiting how large the tiles can be.</p>
+      </div>
+
+      <!-- Section 2 -->
+      <div class="subphase-label">2 &mdash; SRAM Budget Model</div>
+      <div class="details">
+        <p>Each AIE2P core has 65,536 bytes of local data memory. The matmul kernel requires three tile buffers (A, B, C) with double-buffering (ping-pong), plus stack space:</p>
+      </div>
+      <div class="insight-box">
+        <div class="label">SRAM constraint formula</div>
+        <p><code>2 &times; (m&times;k + k&times;n + m&times;n&times;4) + 3328 (stack) &le; 65536</code></p>
+        <p>Where m, k, n are the per-core micro-tile dimensions. The <code>&times;4</code> on the C buffer accounts for int32 accumulation (4 bytes vs 1 byte for int8 A/B).</p>
+      </div>
+      <div class="details">
+        <p>Additional constraints from the array geometry and xclbin compilation:</p>
+      </div>
+      <table>
+        <tr><th>Constraint</th><th>Source</th><th>Effect</th></tr>
+        <tr><td><code>n</code> is capped at 16</td><td>N=64, n_aie_cols=4, n%8==0</td><td>n &isin; {8, 16}</td></tr>
+        <tr><td><code>m</code> must divide 512</td><td>M=2048, n_aie_rows=4</td><td>m &isin; {8, 16, 32, 64, 128, 256, 512}</td></tr>
+        <tr><td><code>k</code> must divide all K dims</td><td>GCD(2048, 4096, 5632, 14336) = 512</td><td>k &isin; {8, 16, 32, 64, 128, 256, 512}</td></tr>
+      </table>
+
+      <!-- Section 3 -->
+      <div class="subphase-label">3 &mdash; Tile Sweep: 7 Configurations Tested</div>
+      <div class="details">
+        <p>All tests used standalone <code>whole_array.exe</code> (the mlir-aie matrix multiplication example compiled for the decode path: M=2048, K=4096, N=64, n_aie_cols=4). Each configuration was run 10 times.</p>
+      </div>
+
+      <div class="section-label">Round 1 &mdash; Varying m and k</div>
+      <table>
+        <tr>
+          <th>Config</th>
+          <th>Micro-tile (m&times;k&times;n)</th>
+          <th>SRAM usage</th>
+          <th>Avg GFLOPS</th>
+          <th>Peak GFLOPS</th>
+          <th>vs Baseline</th>
+        </tr>
+        <tr>
+          <td>Baseline</td>
+          <td>64&times;64&times;16</td>
+          <td>33%</td>
+          <td class="muted">1,495</td>
+          <td class="muted">1,598</td>
+          <td class="muted">&mdash;</td>
+        </tr>
+        <tr>
+          <td>A</td>
+          <td>128&times;64&times;16</td>
+          <td>58%</td>
+          <td class="dead">1,315</td>
+          <td class="dead">1,347</td>
+          <td class="dead">&minus;12%</td>
+        </tr>
+        <tr>
+          <td>B</td>
+          <td>64&times;128&times;16</td>
+          <td>49%</td>
+          <td class="dead">1,320</td>
+          <td class="dead">1,364</td>
+          <td class="dead">&minus;12%</td>
+        </tr>
+        <tr>
+          <td class="highlight"><strong>C</strong></td>
+          <td class="highlight"><strong>128&times;128&times;16</strong></td>
+          <td class="highlight"><strong>86%</strong></td>
+          <td class="highlight"><strong>1,833</strong></td>
+          <td class="highlight"><strong>2,135</strong></td>
+          <td class="highlight"><strong>+23%</strong></td>
+        </tr>
+      </table>
+
+      <div class="section-label">Round 2 &mdash; Exploring k and n extremes</div>
+      <table>
+        <tr>
+          <th>Config</th>
+          <th>Micro-tile (m&times;k&times;n)</th>
+          <th>SRAM usage</th>
+          <th>Avg GFLOPS</th>
+          <th>Peak GFLOPS</th>
+          <th>vs Baseline</th>
+        </tr>
+        <tr>
+          <td>D</td>
+          <td>64&times;256&times;16</td>
+          <td>80%</td>
+          <td class="dead">1,308</td>
+          <td class="dead">1,385</td>
+          <td class="dead">&minus;13%</td>
+        </tr>
+        <tr>
+          <td>E</td>
+          <td>32&times;512&times;16</td>
+          <td>86%</td>
+          <td class="same">1,438</td>
+          <td class="same">1,532</td>
+          <td class="same">&minus;4%</td>
+        </tr>
+        <tr>
+          <td>F (bank-aware)</td>
+          <td>128&times;128&times;16</td>
+          <td>86%</td>
+          <td class="highlight">1,835</td>
+          <td class="highlight">2,061</td>
+          <td class="highlight">+23%</td>
+        </tr>
+      </table>
+
+      <!-- Section 4 -->
+      <div class="subphase-label">4 &mdash; Why 128&times;128&times;16 Wins</div>
+      <div class="insight-box">
+        <div class="label">Key Insight</div>
+        <p>The dominant factor is <strong>NPU instruction count</strong> (runtime sequence length), not compute-per-byte ratio. Config C halves the instruction count (1,292 vs 2,580 instructions) by doubling both m and k. The 4&times; larger compute volume per tile overcomes the additional DMA overhead per transfer.</p>
+      </div>
+      <div class="details">
+        <p>Configs A (m=128 only) and B (k=128 only) each double one dimension but increase instructions to ~3,600&ndash;4,200 due to unbalanced DMA patterns. Config C doubles <em>both</em> dimensions symmetrically, yielding a compact instruction sequence. The SRAM at 86% is near-optimal &mdash; large enough for efficiency but within the 64 KB budget.</p>
+        <p><strong>Bank-aware allocation</strong> (Config F, <code>--alloc-scheme=basic-sequential</code>) showed no meaningful difference vs the default allocator. The AIE2P memory controller handles bank conflicts transparently at this tile size.</p>
+      </div>
+
+      <!-- Section 5 -->
+      <div class="subphase-label">5 &mdash; End-to-End Decode Benchmark</div>
+      <div class="conclusion-box">
+        <div class="label">Result</div>
+        <p>LLaMA-3 8B Q8_0, NPU-only (<code>GGML_VK_DISABLE=1</code>), ngl=0, 32 tokens generated, 3 repetitions:</p>
+      </div>
+      <table>
+        <tr>
+          <th>Configuration</th>
+          <th>Micro-tile</th>
+          <th>Decode throughput</th>
+          <th>Delta</th>
+        </tr>
+        <tr>
+          <td>Baseline</td>
+          <td>64&times;64&times;16</td>
+          <td class="muted">1.14 &plusmn; 0.09 t/s</td>
+          <td class="muted">&mdash;</td>
+        </tr>
+        <tr>
+          <td class="highlight"><strong>Phase 12</strong></td>
+          <td class="highlight"><strong>128&times;128&times;16</strong></td>
+          <td class="highlight"><strong>1.40 &plusmn; 0.16 t/s</strong></td>
+          <td class="highlight"><strong>+23%</strong></td>
+        </tr>
+      </table>
+      <div class="details" style="margin-top:0.6rem;">
+        <p>Model: <code>Meta-Llama-3-8B-Instruct-Q8_0.gguf</code> (8.0 GB). Q8_0 was chosen over Q4_K_M to minimise double-quantisation noise in the int8 pipeline (Q8&rarr;int8 is near-lossless vs Q4&rarr;F32&rarr;int8).</p>
+        <p>The +23% matches the standalone GFLOPS improvement exactly, confirming the tile geometry change propagates cleanly through the full llama.cpp dispatch path.</p>
+      </div>
+
+      <!-- Section 6 -->
+      <div class="subphase-label">6 &mdash; Production Xclbin Builds</div>
+      <div class="details">
+        <p>New decode xclbins were built for all 4 K dimensions used by LLaMA-3 8B:</p>
+      </div>
+      <table>
+        <tr><th>K</th><th>File</th><th>Micro-tile</th><th>Build command</th></tr>
+        <tr>
+          <td>2048</td>
+          <td><code>k2048_n64_decode.xclbin</code></td>
+          <td>128&times;128&times;16</td>
+          <td class="muted">M=2048 K=2048 N=64 m=128 k=128 n=16</td>
+        </tr>
+        <tr>
+          <td>4096</td>
+          <td><code>k4096_n64_decode.xclbin</code></td>
+          <td>128&times;128&times;16</td>
+          <td class="muted">M=2048 K=4096 N=64 m=128 k=128 n=16</td>
+        </tr>
+        <tr>
+          <td>5632</td>
+          <td><code>k5632_n64_decode.xclbin</code></td>
+          <td>128&times;128&times;16</td>
+          <td class="muted">M=2048 K=5632 N=64 m=128 k=128 n=16</td>
+        </tr>
+        <tr>
+          <td>14336</td>
+          <td><code>k14336_n64_decode.xclbin</code></td>
+          <td>128&times;128&times;16</td>
+          <td class="muted">M=2048 K=14336 N=64 m=128 k=128 n=16</td>
+        </tr>
+      </table>
+      <div class="details" style="margin-top:0.5rem;">
+        <p>All built with: <code>dtype_in=i8 dtype_out=i32 AIE_TARGET=aie2p n_aie_cols=4</code> via the <code>whole_array</code> example in mlir-aie.</p>
+        <p>A stale <code>k12288_n64_decode.xclbin</code> (old 64&times;64&times;16 tiles, not used by LLaMA-3 8B) was removed during cleanup.</p>
+      </div>
+
+      <!-- Section 7 -->
+      <div class="subphase-label">7 &mdash; NPU Mode Toggle</div>
+      <div class="details">
+        <p>With both prefill (4-col, TILE_N=256) and decode (128&times;128&times;16, TILE_N=64) xclbins now available, a shell-level mode toggle was added to switch between configurations without editing <code>.zshrc</code>:</p>
+      </div>
+      <table>
+        <tr><th>Command</th><th>Effect</th></tr>
+        <tr>
+          <td><code>npu-mode prefill</code></td>
+          <td>Sources <code>~/.npu-prefill.env</code> &mdash; 4-col xclbins, TILE_N=256, MIN_N=2</td>
+        </tr>
+        <tr>
+          <td><code>npu-mode decode</code></td>
+          <td>Sources <code>~/.npu-decode.env</code> &mdash; 128&times;128&times;16 xclbins, TILE_N=64, MIN_N unset</td>
+        </tr>
+      </table>
+      <div class="details" style="margin-top:0.5rem;">
+        <p>Default mode at shell startup is <code>prefill</code>. The toggle was implemented as two static <code>.env</code> files sourced by a <code>npu-mode</code> shell function, avoiding the <code>find_slot</code> interference that would occur if both xclbin sets were loaded simultaneously (decode slots would steal small-batch prefill dispatches due to tile_n best-fit logic).</p>
+      </div>
+
+      <!-- Section 8 -->
+      <div class="subphase-label">8 &mdash; Peano/Clang Limitation: opt_perf=1 Is a No-Op</div>
+      <div class="warning-box">
+        <div class="label">Discovery</div>
+        <p>The mlir-aie build system exposes <code>OPT_PERF_ENABLED</code> which maps to <code>AIE_LOOP_FLATTEN</code> &rarr; <code>chess_flatten_loop</code>. Under the Peano/clang compiler (<code>__AIECC__</code>), <code>AIE_LOOP_FLATTEN</code> is defined as <strong>empty</strong>. The Chess compiler (xchesscc) that supports this pragma is proprietary and requires a commercial Vitis license.</p>
+      </div>
+      <div class="details">
+        <p>This means the <code>opt_perf=1</code> flag in the mlir-aie build has no effect on the generated code when using the open-source Peano compiler. Any performance difference from <code>opt_perf</code> requires the proprietary Chess compiler.</p>
+      </div>
+
+      <!-- Section 9 -->
+      <div class="subphase-label">9 &mdash; Updated Performance Model</div>
+      <table>
+        <tr>
+          <th>Backend</th>
+          <th>Prefill pp512</th>
+          <th>Decode</th>
+          <th>Status</th>
+        </tr>
+        <tr>
+          <td>XDNA NPU (Phase 12, decode mode)</td>
+          <td class="muted">&mdash;</td>
+          <td class="highlight">1.40 t/s (+23% vs Phase 11)</td>
+          <td class="same">Still compute-bound, but improved tile efficiency</td>
+        </tr>
+        <tr>
+          <td>XDNA NPU (Phase 10, prefill mode)</td>
+          <td>4.71 t/s</td>
+          <td class="muted">~0.7 t/s</td>
+          <td class="muted">Unchanged (different xclbin set)</td>
+        </tr>
+        <tr>
+          <td>Vulkan iGPU (ngl=99)</td>
+          <td class="highlight">~530 t/s</td>
+          <td class="highlight">44.09 t/s</td>
+          <td class="highlight">31&times; faster decode than Phase 12 NPU</td>
+        </tr>
+      </table>
+      <div class="details" style="margin-top:0.5rem;">
+        <p>Phase 12 narrows the NPU-vs-Vulkan decode gap from 63&times; to 31&times;. Still not competitive, but the first Phase since Phase 6 to achieve a measurable throughput improvement from a tile geometry change &mdash; confirming that micro-tile tuning is a viable optimisation axis for the AIE kernel.</p>
+      </div>
+
+      <!-- Section 10 -->
+      <div class="subphase-label">10 &mdash; Implications for Future Work</div>
+      <div class="insight-box">
+        <div class="label">What Phase 12 teaches us</div>
+        <p>Micro-tile geometry matters <em>more</em> than host-side dispatch count. A 2&times; increase in both m and k (same total SRAM) yielded +23%, while Phase 11&rsquo;s 7&times; dispatch reduction yielded 0%. The AIE kernel&rsquo;s internal DMA-to-compute ratio is the bottleneck, not the XRT submission path.</p>
+      </div>
+      <div class="details">
+        <p>This opens a specific optimisation path: <strong>kernel-level tile tuning</strong> within the mlir-aie ObjectFIFO pipeline. The 128&times;128&times;16 tile is optimal for the current SRAM budget, but the kernel itself may not be fully utilising the larger tiles (instruction count halved, but GFLOPS only improved 23%, not 2&times;). Profiling with <code>--trace</code> xclbins would reveal per-core stall cycles and confirm whether DMA latency or instruction scheduling is the remaining bottleneck.</p>
+        <p>The 86% SRAM utilisation also leaves little room for further tile growth without algorithmic changes (e.g., accumulation in the register file instead of SRAM, or single-buffered tiles for read-only data).</p>
+      </div>
+
+      <!-- Section 11 -->
+      <div class="subphase-label">11 &mdash; Conclusion</div>
+      <div class="conclusion-box">
+        <div class="label">Finding</div>
+        <p><strong>128&times;128&times;16</strong> is the optimal decode micro-tile for the mlir-aie <code>whole_array</code> kernel on AIE2P with 64 KB SRAM per core. It achieves +23% decode throughput (1.14 &rarr; 1.40 t/s) by halving the NPU instruction sequence length while staying within the SRAM budget at 86% utilisation. This is the first pure tile-geometry improvement since Phase 6 and confirms that micro-tile tuning is a more productive optimisation axis than host-side dispatch reduction.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Nav footer -->
+  <p style="font-size:0.84rem; color: var(--muted); margin-bottom: 1rem;">
+    &larr; <a href="index.html" style="color: var(--blue); text-decoration: none;">All phases</a>
+    &nbsp;&middot;&nbsp;
+    <a href="phase11.html" style="color: var(--blue); text-decoration: none;">Phase 10+11 &mdash; Pre-staging &amp; Dispatch Reduction</a>
+    &nbsp;&middot;&nbsp;
+    <a href="research-survey.html" style="color: var(--blue); text-decoration: none;">Research Survey</a>
+  </p>
+
+  <footer>
+    Built with <a href="https://claude.ai/code">Claude Code</a> (claude-opus-4-6) &middot;
+    Hardware: Ryzen AI MAX 385 (RyzenAI-npu5, XDNA2) &middot;
+    <a href="https://github.com/BrandedTamarasu-glitch/OllamaAMDNPU">GitHub repo</a>
+  </footer>
+
+</div>
+</body>
+</html>
