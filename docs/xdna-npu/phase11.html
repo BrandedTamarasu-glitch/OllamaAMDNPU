@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AMD XDNA2 NPU Backend — Phase 11 Investigation</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --green: #3fb950;
+      --green-dim: #1a3a22;
+      --blue: #58a6ff;
+      --yellow: #d29922;
+      --yellow-dim: #2e2208;
+      --red: #f85149;
+      --red-dim: #3d1a1a;
+      --orange: #e3693a;
+      --orange-dim: #3a1e0d;
+      --purple: #bc8cff;
+      --purple-dim: #2d1f47;
+      --tag-bg: #1f2937;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 2rem 1rem;
+    }
+    .container { max-width: 860px; margin: 0 auto; }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1.5rem;
+      margin-bottom: 2.5rem;
+    }
+    header h1 { font-size: 1.6rem; font-weight: 700; color: var(--text); }
+    header h1 span { color: var(--blue); }
+    header p { color: var(--muted); margin-top: 0.4rem; font-size: 0.9rem; }
+    header a { color: var(--blue); text-decoration: none; }
+    header a:hover { text-decoration: underline; }
+
+    .hardware-pill {
+      display: inline-block;
+      background: var(--tag-bg);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 0.2rem 0.75rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 0.6rem;
+    }
+
+    .phase {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 1.5rem;
+      overflow: hidden;
+    }
+    .phase-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+      padding: 1.1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .phase-number {
+      flex-shrink: 0;
+      width: 2rem;
+      height: 2rem;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+      font-weight: 700;
+      background: var(--tag-bg);
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .phase.research .phase-number {
+      background: var(--purple-dim);
+      color: var(--purple);
+      border-color: var(--purple);
+    }
+    .phase-title { flex: 1; }
+    .phase-title h2 { font-size: 1rem; font-weight: 600; color: var(--text); }
+    .phase-title p { font-size: 0.83rem; color: var(--muted); margin-top: 0.2rem; }
+    .badge {
+      flex-shrink: 0;
+      font-size: 0.72rem;
+      padding: 0.18rem 0.55rem;
+      border-radius: 12px;
+      font-weight: 600;
+      align-self: flex-start;
+      margin-top: 0.15rem;
+    }
+    .badge.dead-end   { background: var(--red-dim);    color: var(--red); }
+    .badge.ceiling    { background: var(--purple-dim); color: var(--purple); }
+
+    .phase-body { padding: 1.1rem 1.25rem; }
+
+    .conclusion-box {
+      background: var(--purple-dim);
+      border: 1px solid var(--purple);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .conclusion-box .label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--purple);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.3rem;
+    }
+    .conclusion-box p { font-size: 0.87rem; color: var(--text); }
+
+    .dead-box {
+      background: var(--red-dim);
+      border: 1px solid var(--red);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .dead-box .label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--red);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.3rem;
+    }
+    .dead-box p  { font-size: 0.87rem; color: var(--text); }
+    .dead-box ul { font-size: 0.86rem; color: var(--text); padding-left: 1.1rem; margin-top: 0.4rem; }
+    .dead-box ul li { margin-bottom: 0.2rem; }
+
+    .good-box {
+      background: var(--green-dim);
+      border: 1px solid var(--green);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .good-box .label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--green);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.3rem;
+    }
+    .good-box p  { font-size: 0.87rem; color: var(--text); }
+    .good-box ul { font-size: 0.86rem; color: var(--text); padding-left: 1.1rem; margin-top: 0.4rem; }
+    .good-box ul li { margin-bottom: 0.2rem; }
+
+    .warning-box {
+      background: var(--orange-dim);
+      border: 1px solid var(--orange);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .warning-box .label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--orange);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.3rem;
+    }
+    .warning-box p { font-size: 0.87rem; color: var(--text); }
+
+    .details p { font-size: 0.87rem; color: var(--muted); margin-bottom: 0.4rem; }
+    .details p:last-child { margin-bottom: 0; }
+    .details strong { color: var(--text); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.83rem;
+      margin-top: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+    th {
+      text-align: left;
+      color: var(--muted);
+      font-weight: 600;
+      padding: 0.4rem 0.6rem;
+      border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: 0.4rem 0.6rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+    }
+    tr:last-child td { border-bottom: none; }
+    td.highlight { color: var(--green); font-weight: 600; }
+    td.muted     { color: var(--muted); }
+    td.dead      { color: var(--red); }
+    td.same      { color: var(--yellow); }
+
+    .tag {
+      display: inline-block;
+      background: var(--tag-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.1rem 0.4rem;
+      font-size: 0.76rem;
+      color: var(--muted);
+      font-family: "SF Mono", "Consolas", monospace;
+    }
+
+    code {
+      font-family: "SF Mono", "Consolas", monospace;
+      font-size: 0.84em;
+      background: var(--tag-bg);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 0.05em 0.3em;
+    }
+
+    .section-label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin: 0.9rem 0 0.4rem;
+    }
+
+    .subphase-label {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--blue);
+      margin: 1.1rem 0 0.4rem;
+      padding-bottom: 0.3rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    footer {
+      border-top: 1px solid var(--border);
+      padding-top: 1.5rem;
+      margin-top: 2.5rem;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+    footer a { color: var(--blue); text-decoration: none; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <h1>AMD <span>XDNA2 NPU</span> Backend — Changelog</h1>
+    <p>
+      <a href="phase9.html">&larr; Phase 9</a>
+      &nbsp;&middot;&nbsp;
+      Custom <a href="https://github.com/ggml-org/llama.cpp">llama.cpp</a> backend offloading
+      <code>GGML_OP_MUL_MAT</code> to the AMD XDNA2 NPU via XRT kernel dispatch. &nbsp;&middot;&nbsp;
+      <a href="https://github.com/BrandedTamarasu-glitch/OllamaAMDNPU">GitHub</a>
+    </p>
+    <div class="hardware-pill">Ryzen AI MAX 385 &nbsp;&middot;&nbsp; RyzenAI-npu5 (XDNA2)</div>
+  </header>
+
+  <!-- Phase 10 -->
+  <div class="phase research">
+    <div class="phase-header">
+      <div class="phase-number">10</div>
+      <div class="phase-title">
+        <h2>Weight Tile Pre-staging (bo_a Cache)</h2>
+        <p>bo_a DMA elimination &middot; WeightEntry::tile_bos cache &middot; 2026-03-29</p>
+      </div>
+      <span class="badge ceiling">Marginal</span>
+    </div>
+    <div class="phase-body">
+
+      <div class="subphase-label">Summary</div>
+      <div class="details">
+        <p>Phase 9 identified the 280 &micro;s per-dispatch bo_a DMA (8 MB weight tile copy + sync) as a target for elimination. Phase 10 replaced the per-dispatch bo_a with a lazily-populated cache of pre-staged XRT buffer objects (<code>WeightEntry::tile_bos</code>). Weight tiles are copied and synced to device once on first use, then reused on every subsequent token with zero DMA cost.</p>
+      </div>
+
+      <div class="subphase-label">Implementation</div>
+      <div class="details">
+        <p>Removed <code>bo_a</code> from <code>XclbinSlot</code> (saving ~112 MB pre-allocation). Added <code>std::unordered_map&lt;uint64_t, xrt::bo&gt; tile_bos</code> to <code>WeightEntry</code>, keyed by <code>(slot_idx &lt;&lt; 32) | tile_row_index</code>. On cache miss (first token), a <code>host_only</code> BO is allocated via <code>group_id(3)</code>, populated with the quantised weight tile, and synced once. On cache hit (all subsequent tokens), the pre-staged BO is passed directly to the kernel with no memcpy or sync. BOs are destroyed automatically when the weight cache entry is invalidated (M/K dimension change).</p>
+        <p><code>dispatch_tile</code> signature changed from <code>const int8_t * a_tile</code> to <code>xrt::bo &amp; bo_a_staged</code>.</p>
+      </div>
+
+      <div class="subphase-label">Results</div>
+      <table>
+        <tr>
+          <th>Test</th>
+          <th>Without Phase 10</th>
+          <th>With Phase 10</th>
+          <th>Delta</th>
+        </tr>
+        <tr>
+          <td>NPU-only prefill pp512 (TILE_N=256)</td>
+          <td class="muted">4.56 t/s</td>
+          <td>4.71 t/s</td>
+          <td class="same">+3.3%</td>
+        </tr>
+        <tr>
+          <td>NPU decode (MIN_N=MAX_N=1)</td>
+          <td class="muted">baseline</td>
+          <td>+7% (prior session)</td>
+          <td class="same">+7%</td>
+        </tr>
+      </table>
+      <div class="details" style="margin-top:0.6rem;">
+        <p>The bo_a DMA cost (280 &micro;s) is only <strong>24% of the 1,155 &micro;s per-dispatch total</strong>. Eliminating it saves ~197 ms per 704-dispatch token, but kernel compute (733 &micro;s, 63%) dominates. Phase 10 is kept for code cleanliness and the ~112 MB memory saving, not for throughput.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Phase 11 -->
+  <div class="phase research">
+    <div class="phase-header">
+      <div class="phase-number">11</div>
+      <div class="phase-title">
+        <h2>Dispatch Reduction Investigation</h2>
+        <p>xrt::runlist &middot; larger TILE_M xclbins &middot; bo_b sync dedup &middot; compute-bound discovery &middot; 2026-03-30</p>
+      </div>
+      <span class="badge dead-end">Compute-bound</span>
+    </div>
+    <div class="phase-body">
+
+      <!-- Section 1 -->
+      <div class="subphase-label">1 &mdash; Hypothesis</div>
+      <div class="details">
+        <p>Phase 9 measured <strong>~1,155 &micro;s per tile dispatch</strong> (K=4096). With 704 dispatches per token, host-side overhead (submission latency, redundant DMA syncs, per-dispatch bookkeeping) was hypothesised to be a significant fraction. Three approaches were investigated to reduce dispatch count or per-dispatch overhead:</p>
+      </div>
+      <table>
+        <tr>
+          <th>Approach</th>
+          <th>Mechanism</th>
+          <th>Expected Impact</th>
+        </tr>
+        <tr>
+          <td><strong>A.</strong> Redundant bo_b sync elimination</td>
+          <td>Sync activation BO once per N-tile instead of once per dispatch</td>
+          <td>Save 6 &times; 134 &micro;s per 7-tile batch (~10%)</td>
+        </tr>
+        <tr>
+          <td><strong>B1.</strong> TILE_M=4096 xclbins</td>
+          <td>Halve M-tile count (e.g. 14336/4096 = 4 vs 14336/2048 = 7)</td>
+          <td>~50% fewer dispatches (~20&ndash;30%)</td>
+        </tr>
+        <tr>
+          <td><strong>B2.</strong> TILE_M=14336 xclbins</td>
+          <td>Eliminate M-tiling for FFN layers entirely (1 dispatch vs 7)</td>
+          <td>~85% fewer dispatches (~30&ndash;35%)</td>
+        </tr>
+      </table>
+      <div class="details" style="margin-top:0.5rem;">
+        <p>A fourth approach &mdash; <code>xrt::runlist</code> batch dispatch &mdash; was researched but not tested. See section 5.</p>
+      </div>
+
+      <!-- Section 2 -->
+      <div class="subphase-label">2 &mdash; xclbin Build Validation</div>
+      <div class="details">
+        <p>Built 8 new xclbins (4 K dimensions &times; 2 M values) using the <code>mlir-aie</code> <code>whole_array</code> example. All 4-col builds completed in <strong>2&ndash;3 seconds each</strong>, confirming that xclbin compilation is not a bottleneck for experimentation.</p>
+      </div>
+      <table>
+        <tr>
+          <th>TILE_M</th>
+          <th>K dims built</th>
+          <th>TILE_N</th>
+          <th>Instr file size</th>
+        </tr>
+        <tr>
+          <td>4096</td>
+          <td>2048, 4096, 5632, 14336</td>
+          <td>256</td>
+          <td class="muted">20 KB each</td>
+        </tr>
+        <tr>
+          <td>14336</td>
+          <td>2048, 4096, 5632, 14336</td>
+          <td>256</td>
+          <td class="muted">72 KB each (3.5&times; more DMA ops encoded)</td>
+        </tr>
+      </table>
+      <div class="details" style="margin-top:0.5rem;">
+        <p>Divisibility constraint: M must be a multiple of <code>m &times; n_aie_rows = 64 &times; 4 = 256</code>. Both M=4096 (16&times;256) and M=14336 (56&times;256) pass. No upper bound on M was encountered in the compiler.</p>
+      </div>
+
+      <!-- Section 3 -->
+      <div class="subphase-label">3 &mdash; Benchmark Results</div>
+      <div class="dead-box">
+        <div class="label">All approaches produced identical throughput</div>
+        <p>Reducing dispatch count by 2&times; (M=4096) and 7&times; (M=14336) had <strong>zero measurable effect</strong> on prefill throughput. The bo_b sync deduplication also showed no improvement.</p>
+      </div>
+      <table>
+        <tr>
+          <th>Config</th>
+          <th>TILE_M</th>
+          <th>Dispatches per gate_proj (M=14336)</th>
+          <th>pp512 t/s (NPU-only)</th>
+        </tr>
+        <tr>
+          <td>Phase 10 baseline</td>
+          <td>2048</td>
+          <td>7 &times; 2 = 14</td>
+          <td><strong>4.71 &plusmn; 0.19</strong></td>
+        </tr>
+        <tr>
+          <td>+ bo_b sync dedup</td>
+          <td>2048</td>
+          <td>14 (6 fewer syncs)</td>
+          <td class="same">4.52 &plusmn; 0.03</td>
+        </tr>
+        <tr>
+          <td>M=4096 xclbins + bo_b fix</td>
+          <td>4096</td>
+          <td>4 &times; 2 = 8</td>
+          <td class="same">4.56 &plusmn; 0.02</td>
+        </tr>
+        <tr>
+          <td>M=14336 xclbins + bo_b fix</td>
+          <td>14336</td>
+          <td>1 &times; 2 = 2</td>
+          <td class="same">4.60 &plusmn; 0.01</td>
+        </tr>
+      </table>
+      <div class="details" style="margin-top:0.5rem;">
+        <p>All tests: Vulkan hidden (libggml-vulkan.so renamed), <code>MIN_N=2</code>, <code>ngl=0</code>, 3 repetitions, Meta-Llama-3.1-8B-Instruct-Q4_K_M. Backend reported <code>XDNA</code> only.</p>
+      </div>
+
+      <!-- Section 4 -->
+      <div class="subphase-label">4 &mdash; Root Cause: Compute-Bound, Not Dispatch-Bound</div>
+      <div class="conclusion-box">
+        <div class="label">Key Discovery</div>
+        <p>The NPU is <strong>compute-bound</strong>, not dispatch-bound. Reducing dispatch count from 14 to 2 per matmul (7&times; reduction) did not change throughput because the total MACs are identical &mdash; a single M=14336 dispatch performs the same 14336 &times; K &times; 256 int8 MACs as seven M=2048 dispatches. The AIE kernel tiles M internally across 4 rows of cores regardless of the host-side tile size.</p>
+      </div>
+      <div class="details">
+        <p>This conclusively disproves the Phase 9 projection that pre-staging + dispatch reduction could reach ~15 t/s. That projection assumed per-dispatch overhead (bo_b sync, kernel launch, readback) was the bottleneck. In reality:</p>
+      </div>
+      <table>
+        <tr>
+          <th>Component</th>
+          <th>Time (K=4096 tile)</th>
+          <th>% of total</th>
+          <th>Phase 11 finding</th>
+        </tr>
+        <tr>
+          <td>bo_a DMA (weight tile)</td>
+          <td>280 &micro;s</td>
+          <td>24%</td>
+          <td class="highlight">Eliminated by Phase 10 (+3%)</td>
+        </tr>
+        <tr>
+          <td>bo_b sync (activations)</td>
+          <td>134 &micro;s</td>
+          <td>12%</td>
+          <td class="same">Dedup had no effect</td>
+        </tr>
+        <tr>
+          <td>Kernel compute</td>
+          <td>733 &micro;s</td>
+          <td class="dead">63%</td>
+          <td class="dead">Dominant &mdash; unchanged by tile size</td>
+        </tr>
+        <tr>
+          <td>Readback (bo_c sync)</td>
+          <td>5 &micro;s</td>
+          <td>0.4%</td>
+          <td class="muted">Negligible</td>
+        </tr>
+      </table>
+      <div class="details" style="margin-top:0.75rem;">
+        <p><strong>Achieved throughput:</strong> 2.93 GOPS on int8 matmul (measured from 2.147B MACs / 733 &micro;s kernel time).</p>
+        <p><strong>Theoretical peak:</strong> 4 columns &times; 5 cores/column &times; 16 int8 lanes &times; 1.5 GHz = <strong>480 GOPS</strong>.</p>
+        <p><strong>Utilisation:</strong> 2.93 / 480 = <strong>0.6%</strong>. The int8 matmul kernel achieves less than 1% of the AIE2P peak, indicating that the mlir-aie <code>whole_array</code> kernel is heavily bottlenecked by DMA-to-compute synchronisation, memory access patterns, or incomplete vectorisation for the int8 datapath.</p>
+      </div>
+
+      <!-- Section 5 -->
+      <div class="subphase-label">5 &mdash; xrt::runlist (Researched, Not Tested)</div>
+      <div class="details">
+        <p>XRT provides <code>xrt::runlist</code> (<code>/usr/include/xrt/experimental/xrt_kernel.h</code>) for batch dispatch: add N <code>xrt::run</code> objects, call <code>execute()</code> once, <code>wait()</code> once. A working example exists at <code>mlir-aie/test/npu-xrt/add_one_two_runlist/test.cpp</code>.</p>
+        <p>This was not tested because the Phase 11 tile-size experiments proved the bottleneck is kernel compute time, not submission overhead. Even if runlist eliminated all per-dispatch submission latency (~5&ndash;10 &micro;s each &times; 704 = ~5 ms total), that represents &lt;1% of the ~213 ms/token compute budget. The XRT docs also do not guarantee hardware pipelining &mdash; runs may execute serially on XDNA2.</p>
+      </div>
+
+      <!-- Section 6 -->
+      <div class="subphase-label">6 &mdash; Corrected Performance Model</div>
+      <div class="warning-box">
+        <div class="label">Phase 9 projection invalidated</div>
+        <p>Phase 9 estimated 95 &micro;s per dispatch with pre-staging, projecting ~15 t/s decode. This assumed kernel compute at ~67 &micro;s &mdash; roughly 11&times; faster than the measured 733 &micro;s. The 95 &micro;s figure was aspirational, not derived from measurement. The actual physical ceiling with the current kernel is <strong>~4.7 t/s prefill</strong> and <strong>~0.7 t/s decode</strong>.</p>
+      </div>
+
+      <div class="section-label">Updated system baseline</div>
+      <table>
+        <tr>
+          <th>Backend</th>
+          <th>Prefill pp512</th>
+          <th>Decode</th>
+          <th>Status</th>
+        </tr>
+        <tr>
+          <td>XDNA NPU (Phase 10, 4-col prefill)</td>
+          <td>4.71 t/s</td>
+          <td class="muted">~0.7 t/s</td>
+          <td class="dead">Compute-bound at 0.6% AIE utilisation</td>
+        </tr>
+        <tr>
+          <td>Vulkan iGPU (ngl=99)</td>
+          <td class="highlight">~530 t/s</td>
+          <td class="highlight">44.09 t/s</td>
+          <td class="highlight">112&times; faster prefill, 63&times; faster decode</td>
+        </tr>
+        <tr>
+          <td>CPU only</td>
+          <td class="muted">~4.3 t/s</td>
+          <td class="muted">3.76 t/s</td>
+          <td class="muted">Comparable to NPU prefill</td>
+        </tr>
+      </table>
+      <div class="details" style="margin-top:0.5rem;">
+        <p>NPU prefill (4.71 t/s) is now roughly equivalent to CPU-only performance (~4.3 t/s). The NPU adds no meaningful advantage over CPU for either prefill or decode with the current kernel.</p>
+      </div>
+
+      <!-- Section 7 -->
+      <div class="subphase-label">7 &mdash; What Would Move the Needle</div>
+      <div class="details">
+        <p>The only path to meaningful NPU improvement is <strong>kernel-level optimisation</strong> &mdash; increasing AIE utilisation from 0.6% toward theoretical peak. This is outside the scope of the host-side llama.cpp backend and requires changes to the mlir-aie kernel code:</p>
+      </div>
+      <div class="good-box">
+        <div class="label">Potential kernel improvements</div>
+        <ul>
+          <li><strong>Vectorised int8 MAC:</strong> Current kernel may not fully utilise the 16-wide int8 SIMD lanes on AIE2P. Profiling with <code>--trace</code> xclbins would reveal per-core IPC and stall cycles.</li>
+          <li><strong>DMA/compute overlap:</strong> The kernel uses <code>fifo_depth=2</code> (ping-pong) but may still stall on DMA waits between transfer blocks. Increasing FIFO depth or restructuring the ObjectFIFO pipeline could hide DMA latency.</li>
+          <li><strong>Larger per-core tiles (m, k, n):</strong> Current micro-tiles are 64&times;64&times;64. Larger tiles reduce DMA overhead relative to compute. The constraint is per-core local memory (typically 32&ndash;64 KB on AIE2P).</li>
+          <li><strong>Dedicated int8 matmul kernel:</strong> The <code>whole_array</code> example is a general-purpose matrix multiplication. A kernel specifically optimised for the LLaMA layer shapes (M=4096/14336, fixed K, small N for decode) could achieve significantly higher utilisation.</li>
+          <li><strong>AMD official NPU kernels:</strong> AMD's Ryzen AI Software SDK may ship optimised int8/int4 kernels with higher AIE utilisation. These are not currently compatible with the XRT dispatch model used here.</li>
+        </ul>
+      </div>
+
+      <!-- Section 8 -->
+      <div class="subphase-label">8 &mdash; Phase 10 Audit Fixes (Committed Separately)</div>
+      <div class="details">
+        <p>A full-project audit was completed alongside Phase 10, addressing 13 findings across 8 files. These were committed separately from Phase 10 to maintain clean git history:</p>
+      </div>
+      <table>
+        <tr>
+          <th>ID</th>
+          <th>Fix</th>
+          <th>File</th>
+        </tr>
+        <tr><td>H2</td><td>Corrected &ldquo;16 AIE columns&rdquo; &rarr; 8 physical columns</td><td class="muted">phase6.html</td></tr>
+        <tr><td>H3</td><td>Updated ggml-xdna.h header (ranges, MIN_N/MAX_N, multi-slot docs)</td><td class="muted">ggml-xdna.h</td></tr>
+        <tr><td>H4</td><td>Fixed stale &ldquo;~42 t/s&rdquo; claim (was Vulkan, not NPU)</td><td class="muted">env-template.sh</td></tr>
+        <tr><td>M2</td><td>Documented double quantisation rationale (Q4&rarr;F32&rarr;int8)</td><td class="muted">ggml-xdna.cpp</td></tr>
+        <tr><td>M3</td><td>Replaced <code>atoll</code> with <code>strtoll</code> + errno (2 sites)</td><td class="muted">ggml-xdna.cpp</td></tr>
+        <tr><td>M4</td><td>Documented weight cache key stability assumption (LoRA caveat)</td><td class="muted">ggml-xdna.cpp</td></tr>
+        <tr><td>M5</td><td>Removed duplicate test file, updated README path</td><td class="muted">README.md</td></tr>
+        <tr><td>M6</td><td>Added <code>$XILINX_XRT</code> to CMake HINTS</td><td class="muted">CMakeLists.txt</td></tr>
+        <tr><td>L3</td><td>Auto-detect amdgpu hwmon in bench-power.sh</td><td class="muted">bench-power.sh</td></tr>
+        <tr><td>S4</td><td>Set <code>kernel_ready=false</code> after NPU timeout</td><td class="muted">ggml-xdna.cpp</td></tr>
+      </table>
+
+      <!-- Section 9 -->
+      <div class="subphase-label">9 &mdash; Commits</div>
+      <table>
+        <tr>
+          <th>Hash</th>
+          <th>Description</th>
+        </tr>
+        <tr>
+          <td><code>28716bc1f</code></td>
+          <td>fix: audit findings &mdash; strtoll, hwmon auto-detect, docs corrections</td>
+        </tr>
+        <tr>
+          <td><code>3be46a84f</code></td>
+          <td>feat: Phase 10 &mdash; bo_a weight tile pre-staging cache</td>
+        </tr>
+      </table>
+      <div class="details" style="margin-top:0.5rem;">
+        <p>Phase 11 produced no code changes. The bo_b sync deduplication was tested and reverted (no measurable benefit). The M=4096 and M=14336 xclbins remain in the mlir-aie build directory for future use but are not referenced by the backend.</p>
+      </div>
+
+      <!-- Section 10 -->
+      <div class="subphase-label">10 &mdash; Conclusion</div>
+      <div class="conclusion-box">
+        <div class="label">Finding</div>
+        <p>The XDNA2 NPU backend has reached an <strong>AIE kernel compute ceiling</strong>. All host-side optimisations (weight pre-staging, dispatch reduction, DMA deduplication, larger tiles) have been exhausted with negligible effect. The int8 matmul kernel achieves 0.6% of theoretical AIE2P peak throughput. Further improvement requires kernel-level changes in the mlir-aie compiler or a fundamentally different NPU kernel architecture.</p>
+      </div>
+      <div class="conclusion-box">
+        <div class="label">Practical Recommendation</div>
+        <p>For LLaMA 8B inference on Strix Halo: <strong>use Vulkan exclusively</strong> (530 t/s prefill, 44 t/s decode). The NPU backend serves as a proof-of-concept for the XDNA2 dispatch path and as a testbed for future kernel improvements, but does not provide competitive throughput with the current mlir-aie int8 matmul kernel.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Nav footer -->
+  <p style="font-size:0.84rem; color: var(--muted); margin-bottom: 1rem;">
+    &larr; <a href="index.html" style="color: var(--blue); text-decoration: none;">All phases</a>
+    &nbsp;&middot;&nbsp;
+    <a href="phase9.html" style="color: var(--blue); text-decoration: none;">Phase 9 &mdash; Root Cause Investigation</a>
+  </p>
+
+  <footer>
+    Built with <a href="https://claude.ai/code">Claude Code</a> (claude-opus-4-6) &middot;
+    Hardware: Ryzen AI MAX 385 (RyzenAI-npu5, XDNA2) &middot;
+    <a href="https://github.com/BrandedTamarasu-glitch/OllamaAMDNPU">GitHub repo</a>
+  </footer>
+
+</div>
+</body>
+</html>
