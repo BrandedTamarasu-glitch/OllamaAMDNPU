@@ -273,8 +273,26 @@ Notes:
 | 7 | ⚠️ Corrected | Vulkan prefill (930 t/s) + decode xclbin work — **the claimed 43.84 t/s NPU decode was Vulkan decode** (llama-bench ngl=99 default). Genuine achievement: Vulkan prefill at 930 t/s. NPU decode xclbins built but not viable at current dispatch cost (~0.65 t/s actual). Phase 7 also inadvertently broke Phase 6 NPU prefill by replacing all xclbins and setting MIN_N=MAX_N=1. |
 | 8 | ✅ Done | Vulkan decode ceiling investigation — batch sweep flat at 43.7 t/s; int4 ruled out (SNR 44.8→19.7 dB); cascade ruled out; speculative decoding (44% accept, 212 t/s draft) yields no net gain; **43.7 t/s is the LPDDR5 bandwidth ceiling for Vulkan decode** |
 | 9 | ✅ Done | Root cause investigation — Phase 7 misattribution confirmed; Phase 6 NPU prefill restored (12.2 t/s pp512, 18.4 t/s pp160); dispatch timing overhead removed; corrected baselines documented |
+| 10 | ✅ Done | Weight tile pre-staging (bo_a cache) — eliminated per-dispatch 280 µs DMA copy; +3% prefill; 112 MB memory saving; audit fixes across 8 files |
+| 11 | ✅ Done | Dispatch reduction investigation — tested bo_b sync dedup, TILE_M=4096/14336 xclbins, xrt::runlist research. **All approaches produced identical throughput.** NPU is compute-bound at 0.6% AIE utilisation, not dispatch-bound. Host-side optimisation exhausted. |
 
 ---
+
+## NPU Compute Ceiling (Phase 11 findings)
+
+> **All host-side optimisations are exhausted.** The NPU bottleneck is AIE kernel compute, not dispatch overhead.
+
+The int8 matmul kernel achieves **2.93 GOPS** on a theoretical peak of **480 GOPS** (4 columns × 5 cores × 16 int8 lanes × 1.5 GHz) = **0.6% AIE utilisation**. Reducing dispatch count by 7× (TILE_M=14336 vs 2048) had zero effect on throughput because total MACs are identical — the kernel tiles M internally.
+
+| Approach | Expected | Actual |
+|----------|----------|--------|
+| bo_a DMA elimination (Phase 10) | −24% dispatch time | +3% prefill (kept for memory saving) |
+| bo_b sync deduplication | −12% dispatch time | No measurable effect |
+| TILE_M=4096 (halve dispatches) | +20–30% | No change (4.56 t/s) |
+| TILE_M=14336 (7× fewer dispatches) | +30–35% | No change (4.60 t/s) |
+| xrt::runlist batch dispatch | <1% (researched, not tested) | — |
+
+**For LLaMA 8B on Strix Halo: use Vulkan exclusively** (530 t/s prefill, 44 t/s decode). The NPU backend serves as a proof-of-concept for XDNA2 dispatch and a testbed for future kernel improvements. Further NPU improvement requires kernel-level changes in mlir-aie (vectorised int8 MAC, DMA/compute overlap, larger per-core tiles).
 
 ## Performance Ceiling (Phase 8 findings)
 
@@ -297,9 +315,9 @@ The bottleneck is LPDDR5 bandwidth serving the KV cache. Every decode step must 
 
 ## AI Assistance
 
-This project was designed and implemented with the assistance of **Claude Sonnet 4.6** (`claude-sonnet-4-6`) by [Anthropic](https://www.anthropic.com), accessed via [Claude Code](https://claude.ai/code).
+This project was designed and implemented with the assistance of **Claude Sonnet 4.6** and **Claude Opus 4.6** by [Anthropic](https://www.anthropic.com), accessed via [Claude Code](https://claude.ai/code).
 
-AI assistance covered: backend architecture, XRT kernel dispatch design, tile loop optimisation, performance debugging, benchmarking tooling, and documentation.
+AI assistance covered: backend architecture, XRT kernel dispatch design, tile loop optimisation, performance debugging, benchmarking tooling, xclbin build experimentation, and documentation.
 
 ---
 
