@@ -1,0 +1,15 @@
+{
+  "xclbin_path": "",
+  "kernel_source": "mm.cc",
+  "kernel_source_hash": "",
+  "compiler": "peano",
+  "compiler_flags": "",
+  "fifo_depth": 2,
+  "c_row_maj": true,
+  "opt_perf_enabled": false,
+  "trace_enabled": false,
+  "build_date": "",
+  "build_commit": "",
+  "license": "apache-2.0",
+  "notes": ""
+}
