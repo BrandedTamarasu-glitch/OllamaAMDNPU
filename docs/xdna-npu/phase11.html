@@ -587,7 +587,48 @@
       </div>
 
       <!-- Section 10 -->
-      <div class="subphase-label">10 &mdash; Conclusion</div>
+      <div class="subphase-label">10 &mdash; External Validation</div>
+      <div class="details">
+        <p>A literature review (<a href="research-survey.html" style="color: var(--blue);">full survey</a>) confirms our Phase 11 findings are consistent with independent research:</p>
+      </div>
+      <table>
+        <tr>
+          <th>Finding</th>
+          <th>External source</th>
+          <th>Key result</th>
+        </tr>
+        <tr>
+          <td>0.6% AIE utilisation is expected for unoptimised kernels</td>
+          <td>NPUEval (arXiv:2507.14403), DPUV4E (arXiv:2506.11441)</td>
+          <td>~10% mean vectorisation for auto-generated code; &lt;5% for small BERT MM layers</td>
+        </tr>
+        <tr>
+          <td>Same XDNA2 silicon achieves 76% peak with optimised GEMM</td>
+          <td>&ldquo;Striking the Balance&rdquo; (arXiv:2512.13282)</td>
+          <td class="highlight">38.05 TOPS int8 on Strix Point &mdash; 127&times; our throughput</td>
+        </tr>
+        <tr>
+          <td>DMA-compute overlap is the single biggest gain</td>
+          <td>Striking the Balance, GAMA (arXiv:2504.09688)</td>
+          <td>28% loss from missing overlap alone; &gamma; = 0.72 for int8&times;int32</td>
+        </tr>
+        <tr>
+          <td>NPU-vs-GPU gap is industry-wide, not AMD-specific</td>
+          <td>NITRO (Intel), ASPLOS&rsquo;25 (Qualcomm), Orion (Apple)</td>
+          <td class="dead">No vendor&rsquo;s NPU beats its GPU for LLM decode</td>
+        </tr>
+        <tr>
+          <td>NPU&rsquo;s only advantage is power efficiency</td>
+          <td>FastFlowLM, arXiv:2603.23640</td>
+          <td>&lt;2W NPU vs ~25W GPU (&gt;10&times; perf/watt)</td>
+        </tr>
+      </table>
+      <div class="details" style="margin-top:0.5rem;">
+        <p>This project appears to be the <strong>furthest any independent developer has publicly reached</strong> with custom NPU workloads on XDNA2. No upstream llama.cpp NPU backend exists for any vendor. See the <a href="research-survey.html" style="color: var(--blue);">full research survey</a> for 21 cited sources.</p>
+      </div>
+
+      <!-- Section 11 -->
+      <div class="subphase-label">11 &mdash; Conclusion</div>
       <div class="conclusion-box">
         <div class="label">Finding</div>
         <p>The XDNA2 NPU backend has reached an <strong>AIE kernel compute ceiling</strong>. All host-side optimisations (weight pre-staging, dispatch reduction, DMA deduplication, larger tiles) have been exhausted with negligible effect. The int8 matmul kernel achieves 0.6% of theoretical AIE2P peak throughput. Further improvement requires kernel-level changes in the mlir-aie compiler or a fundamentally different NPU kernel architecture.</p>
@@ -602,6 +643,8 @@
 
   <!-- Nav footer -->
   <p style="font-size:0.84rem; color: var(--muted); margin-bottom: 1rem;">
+    <a href="research-survey.html" style="color: var(--blue); text-decoration: none;">Research Survey &rarr;</a>
+    &nbsp;&middot;&nbsp;
     &larr; <a href="index.html" style="color: var(--blue); text-decoration: none;">All phases</a>
     &nbsp;&middot;&nbsp;
     <a href="phase9.html" style="color: var(--blue); text-decoration: none;">Phase 9 &mdash; Root Cause Investigation</a>

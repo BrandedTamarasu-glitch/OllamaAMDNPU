@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AMD XDNA2 NPU — Independent Research Survey</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --green: #3fb950;
+      --green-dim: #1a3a22;
+      --blue: #58a6ff;
+      --yellow: #d29922;
+      --yellow-dim: #2e2208;
+      --red: #f85149;
+      --red-dim: #3d1a1a;
+      --orange: #e3693a;
+      --orange-dim: #3a1e0d;
+      --purple: #bc8cff;
+      --purple-dim: #2d1f47;
+      --tag-bg: #1f2937;
+      --cyan: #56d4dd;
+      --cyan-dim: #0d2d30;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 2rem 1rem;
+    }
+    .container { max-width: 900px; margin: 0 auto; }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 1.5rem;
+      margin-bottom: 2.5rem;
+    }
+    header h1 { font-size: 1.6rem; font-weight: 700; color: var(--text); }
+    header h1 span { color: var(--blue); }
+    header p { color: var(--muted); margin-top: 0.4rem; font-size: 0.9rem; }
+    header a { color: var(--blue); text-decoration: none; }
+    header a:hover { text-decoration: underline; }
+    .hardware-pill {
+      display: inline-block;
+      background: var(--tag-bg);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 0.2rem 0.75rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 0.6rem;
+    }
+
+    .section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 1.5rem;
+      overflow: hidden;
+    }
+    .section-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+      padding: 1.1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .section-num {
+      flex-shrink: 0;
+      width: 2rem;
+      height: 2rem;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+      font-weight: 700;
+      background: var(--cyan-dim);
+      color: var(--cyan);
+      border: 1px solid var(--cyan);
+    }
+    .section-title { flex: 1; }
+    .section-title h2 { font-size: 1rem; font-weight: 600; color: var(--text); }
+    .section-title p { font-size: 0.83rem; color: var(--muted); margin-top: 0.2rem; }
+    .section-body { padding: 1.1rem 1.25rem; }
+
+    .conclusion-box {
+      background: var(--purple-dim);
+      border: 1px solid var(--purple);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .conclusion-box .label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--purple);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.3rem;
+    }
+    .conclusion-box p { font-size: 0.87rem; color: var(--text); }
+
+    .dead-box {
+      background: var(--red-dim);
+      border: 1px solid var(--red);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .dead-box .label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--red);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.3rem;
+    }
+    .dead-box p { font-size: 0.87rem; color: var(--text); }
+
+    .good-box {
+      background: var(--green-dim);
+      border: 1px solid var(--green);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .good-box .label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--green);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.3rem;
+    }
+    .good-box p { font-size: 0.87rem; color: var(--text); }
+    .good-box ul { font-size: 0.86rem; color: var(--text); padding-left: 1.1rem; margin-top: 0.4rem; }
+    .good-box ul li { margin-bottom: 0.2rem; }
+
+    .warning-box {
+      background: var(--orange-dim);
+      border: 1px solid var(--orange);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .warning-box .label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--orange);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.3rem;
+    }
+    .warning-box p { font-size: 0.87rem; color: var(--text); }
+
+    .info-box {
+      background: var(--cyan-dim);
+      border: 1px solid var(--cyan);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .info-box .label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--cyan);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.3rem;
+    }
+    .info-box p { font-size: 0.87rem; color: var(--text); }
+
+    .details p { font-size: 0.87rem; color: var(--muted); margin-bottom: 0.4rem; }
+    .details p:last-child { margin-bottom: 0; }
+    .details strong { color: var(--text); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.83rem;
+      margin-top: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+    th {
+      text-align: left;
+      color: var(--muted);
+      font-weight: 600;
+      padding: 0.4rem 0.6rem;
+      border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: 0.4rem 0.6rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+    }
+    tr:last-child td { border-bottom: none; }
+    td.highlight { color: var(--green); font-weight: 600; }
+    td.muted { color: var(--muted); }
+    td.dead { color: var(--red); }
+    td.same { color: var(--yellow); }
+    td.info { color: var(--cyan); }
+
+    code {
+      font-family: "SF Mono", "Consolas", monospace;
+      font-size: 0.84em;
+      background: var(--tag-bg);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 0.05em 0.3em;
+    }
+
+    .subphase-label {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--blue);
+      margin: 1.1rem 0 0.4rem;
+      padding-bottom: 0.3rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .ref-list { list-style: none; padding: 0; }
+    .ref-list li {
+      font-size: 0.83rem;
+      color: var(--muted);
+      margin-bottom: 0.6rem;
+      padding-left: 2rem;
+      text-indent: -2rem;
+    }
+    .ref-list li strong { color: var(--text); }
+    .ref-list li a { color: var(--blue); text-decoration: none; }
+    .ref-list li a:hover { text-decoration: underline; }
+
+    footer {
+      border-top: 1px solid var(--border);
+      padding-top: 1.5rem;
+      margin-top: 2.5rem;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+    footer a { color: var(--blue); text-decoration: none; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <h1>AMD <span>XDNA2 NPU</span> &mdash; Independent Research Survey</h1>
+    <p>
+      <a href="phase11.html">&larr; Phase 11</a>
+      &nbsp;&middot;&nbsp;
+      Literature review of NPU performance, AIE utilisation, and LLM inference across vendors.
+      &nbsp;&middot;&nbsp;
+      <a href="https://github.com/BrandedTamarasu-glitch/OllamaAMDNPU">GitHub</a>
+    </p>
+    <div class="hardware-pill">Ryzen AI MAX 385 &nbsp;&middot;&nbsp; RyzenAI-npu5 (XDNA2) &nbsp;&middot;&nbsp; Survey date: 2026-03-30</div>
+  </header>
+
+  <!-- Executive Summary -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num">0</div>
+      <div class="section-title">
+        <h2>Executive Summary</h2>
+        <p>Key findings from independent research, academic papers, and community reports</p>
+      </div>
+    </div>
+    <div class="section-body">
+      <div class="conclusion-box">
+        <div class="label">Core finding</div>
+        <p>Our Phase 11 discovery of <strong>0.6% AIE utilisation</strong> is consistent with the academic literature for unoptimised kernels. Expert-optimised GEMM kernels on the same XDNA2 silicon achieve <strong>38 TOPS (76% of peak)</strong> &mdash; a 127&times; improvement. The gap is entirely in the AIE kernel, not host-side dispatch.</p>
+      </div>
+      <div class="dead-box">
+        <div class="label">Industry-wide pattern</div>
+        <p><strong>No vendor&rsquo;s NPU beats its companion GPU for LLM token generation.</strong> Intel, Qualcomm, Apple, and AMD all show the same structural mismatch: LLM decode is memory-bandwidth-bound, not compute-bound. TOPS ratings are irrelevant when every token must read the full model weights from shared DRAM.</p>
+      </div>
+      <div class="info-box">
+        <div class="label">Project context</div>
+        <p>This project appears to be the <strong>furthest any independent developer has publicly reached</strong> with custom NPU workloads on XDNA2. No other llama.cpp NPU backend exists for any vendor. Community sentiment is that NPU software stacks across all vendors remain immature.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 1: XDNA2 GEMM Benchmarks -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num">1</div>
+      <div class="section-title">
+        <h2>XDNA2 Independent GEMM Benchmarks</h2>
+        <p>What others have achieved on the same silicon</p>
+      </div>
+    </div>
+    <div class="section-body">
+
+      <div class="subphase-label">&ldquo;Striking the Balance&rdquo; &mdash; arXiv:2512.13282 (Dec 2025)</div>
+      <div class="details">
+        <p>Ramezani et al. performed the most rigorous independent GEMM benchmark on both XDNA (Phoenix) and XDNA2 (Strix Point) NPUs, using optimised kernels with DMA-compute overlap and proper vectorisation.</p>
+      </div>
+      <table>
+        <tr>
+          <th>Precision</th>
+          <th>XDNA (10 TOPS peak)</th>
+          <th>XDNA2 (50 TOPS peak)</th>
+          <th>XDNA2 % of peak</th>
+        </tr>
+        <tr>
+          <td>int8 &times; int8</td>
+          <td class="muted">6.76 TOPS</td>
+          <td class="highlight">38.05 TOPS</td>
+          <td class="highlight">76.1%</td>
+        </tr>
+        <tr>
+          <td>int8 &times; int16</td>
+          <td class="muted">6.05 TOPS</td>
+          <td>31.52 TOPS</td>
+          <td>63.0%</td>
+        </tr>
+        <tr>
+          <td>int8 &times; int32</td>
+          <td class="muted">4.57 TOPS</td>
+          <td>25.31 TOPS</td>
+          <td class="same">50.6%</td>
+        </tr>
+        <tr>
+          <td>bf16 &times; bf16</td>
+          <td class="muted">3.14 TOPS</td>
+          <td>14.71 TOPS</td>
+          <td class="dead">29.4%</td>
+        </tr>
+      </table>
+      <div class="details" style="margin-top:0.5rem;">
+        <p>Key findings: L1 core memory utilisation <strong>94&ndash;97%</strong>. Effective DRAM bandwidth ~50 GB/s (XDNA2). Without DMA-compute overlap, a <strong>28% performance drop</strong> occurs. Optimal GEMM sizes were ~4K &times; 4K &times; 4K.</p>
+        <p><strong>Our int8 &times; int32 pipeline maps to 25.31 TOPS achievable (50.6%)</strong> &mdash; not the full 38 TOPS of int8 &times; int8. Even so, that is <strong>~8,600&times;</strong> our measured 2.93 GOPS. The kernel quality gap is enormous.</p>
+      </div>
+
+      <div class="subphase-label">NPU-Only LLM Inference &mdash; 7shi / Zenn.dev (Oct 2025)</div>
+      <div class="details">
+        <p>Direct comparison on Ryzen AI Max+ 395, 64 GB VRAM, using Ollama (CPU/GPU) vs FastFlowLM (NPU). Model: gpt-oss:20b.</p>
+      </div>
+      <table>
+        <tr>
+          <th>Device</th>
+          <th>Prompt eval (t/s)</th>
+          <th>Generation (t/s)</th>
+        </tr>
+        <tr>
+          <td>GPU (Vulkan)</td>
+          <td class="highlight">401.46</td>
+          <td class="highlight">44.58</td>
+        </tr>
+        <tr>
+          <td>CPU</td>
+          <td>92.58</td>
+          <td>17.04</td>
+        </tr>
+        <tr>
+          <td>NPU (FastFlowLM)</td>
+          <td class="dead">18.20</td>
+          <td class="dead">10.94</td>
+        </tr>
+      </table>
+      <div class="details" style="margin-top:0.5rem;">
+        <p>Author&rsquo;s conclusion: <em>&ldquo;The GPU was the fastest, the CPU showed higher performance than the NPU, and the NPU was the slowest.&rdquo;</em> GPU recommended for desktop LLM use. FastFlowLM is AMD-backed purpose-built NPU software &mdash; this represents the best-case NPU scenario.</p>
+      </div>
+
+      <div class="subphase-label">FastFlowLM Best-Case Numbers</div>
+      <table>
+        <tr>
+          <th>Model</th>
+          <th>Tokens/sec</th>
+          <th>NPU power</th>
+        </tr>
+        <tr>
+          <td>Llama 3.2 1B Q4_1</td>
+          <td>66</td>
+          <td class="highlight">&lt;2W</td>
+        </tr>
+        <tr>
+          <td>Llama 3.2 3B</td>
+          <td>28</td>
+          <td class="highlight">&lt;2W</td>
+        </tr>
+        <tr>
+          <td>GPT-OSS 20B (MoE)</td>
+          <td>19</td>
+          <td class="highlight">&lt;2W</td>
+        </tr>
+      </table>
+      <div class="details" style="margin-top:0.5rem;">
+        <p>The NPU&rsquo;s sole advantage is <strong>power efficiency</strong>: ~2W vs ~25W for GPU. Over 10&times; better perf/watt claimed. For battery-powered, background inference this matters. For throughput, it does not.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Section 2: AIE Utilisation Spectrum -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num">2</div>
+      <div class="section-title">
+        <h2>AIE Utilisation Spectrum: 0.6% to 98%</h2>
+        <p>Where unoptimised kernels sit in the literature</p>
+      </div>
+    </div>
+    <div class="section-body">
+
+      <div class="conclusion-box">
+        <div class="label">Key insight</div>
+        <p>The 0.6% utilisation we measured is <strong>the expected result</strong> for a first-pass kernel without vectorisation, DMA double-buffering, and compute-communication overlap. It is not an anomaly &mdash; it is well-documented in the literature.</p>
+      </div>
+
+      <div class="subphase-label">Expert-Optimised Kernels (80&ndash;98%)</div>
+      <table>
+        <tr>
+          <th>Source</th>
+          <th>Hardware</th>
+          <th>Data type</th>
+          <th>Utilisation</th>
+        </tr>
+        <tr>
+          <td>AIE4ML (arXiv:2512.15946)</td>
+          <td>Versal VEK280, 304 tiles</td>
+          <td>i8 &times; i8</td>
+          <td class="highlight">95.8% single-kernel</td>
+        </tr>
+        <tr>
+          <td>AIE4ML</td>
+          <td>VEK280, full array</td>
+          <td>i8 end-to-end</td>
+          <td class="highlight">82.2% (160 / 194 TOPS)</td>
+        </tr>
+        <tr>
+          <td>GAMA (arXiv:2504.09688)</td>
+          <td>Versal VEK280, 288 tiles</td>
+          <td>int8</td>
+          <td class="highlight">85% (165 TOPS)</td>
+        </tr>
+        <tr>
+          <td>GAMA</td>
+          <td>VEK280</td>
+          <td>bf16</td>
+          <td class="highlight">86% (83 TFLOPS)</td>
+        </tr>
+        <tr>
+          <td>ARIES (FPGA 2025)</td>
+          <td>Versal VCK190</td>
+          <td>INT8</td>
+          <td class="highlight">~87% (45.94 TOPS)</td>
+        </tr>
+      </table>
+
+      <div class="subphase-label">Automated / Mid-Range (30&ndash;80%)</div>
+      <table>
+        <tr>
+          <th>Source</th>
+          <th>Hardware</th>
+          <th>Data type</th>
+          <th>Utilisation</th>
+        </tr>
+        <tr>
+          <td>MLIR-AIR (arXiv:2510.14871)</td>
+          <td>AIE</td>
+          <td>I16</td>
+          <td>78.7%</td>
+        </tr>
+        <tr>
+          <td>MLIR-AIR</td>
+          <td>AIE</td>
+          <td>I8</td>
+          <td>59.1%</td>
+        </tr>
+        <tr>
+          <td>FCCM 2024 (arXiv:2404.11066)</td>
+          <td>Versal VC1902</td>
+          <td>int8</td>
+          <td>58.9&ndash;60.1%</td>
+        </tr>
+        <tr>
+          <td>MLIR-AIR</td>
+          <td>AIE</td>
+          <td>BF16</td>
+          <td class="same">48.6%</td>
+        </tr>
+      </table>
+
+      <div class="subphase-label">Naive / Unoptimised (0.5&ndash;10%)</div>
+      <table>
+        <tr>
+          <th>Source</th>
+          <th>Hardware</th>
+          <th>Observation</th>
+          <th>Context</th>
+        </tr>
+        <tr>
+          <td>NPUEval (arXiv:2507.14403)</td>
+          <td>XDNA</td>
+          <td class="dead">~10% mean vectorisation</td>
+          <td>LLM-generated AIE kernels</td>
+        </tr>
+        <tr>
+          <td>DPUV4E (arXiv:2506.11441)</td>
+          <td>Versal ACAP</td>
+          <td class="dead">&lt;5% of theoretical</td>
+          <td>Small BERT MM layers</td>
+        </tr>
+        <tr>
+          <td><strong>This project (Phase 11)</strong></td>
+          <td><strong>XDNA2 Strix Halo</strong></td>
+          <td class="dead"><strong>0.6%</strong></td>
+          <td><strong>mlir-aie whole_array example kernel</strong></td>
+        </tr>
+      </table>
+
+      <div class="subphase-label">Optimisation Effort vs. Utilisation</div>
+      <div class="details">
+        <p>The literature reveals a clear progression. Each step requires substantially more effort than the last:</p>
+      </div>
+      <table>
+        <tr>
+          <th>Optimisation level</th>
+          <th>Expected utilisation</th>
+          <th>Effort</th>
+        </tr>
+        <tr>
+          <td>Naive scalar kernel, single tile</td>
+          <td class="dead">0.5&ndash;5%</td>
+          <td class="muted">Hours</td>
+        </tr>
+        <tr>
+          <td>Vectorised kernel, single tile</td>
+          <td class="same">10&ndash;30%</td>
+          <td class="muted">Days</td>
+        </tr>
+        <tr>
+          <td>Vectorised + double-buffered, single tile</td>
+          <td>50&ndash;80%</td>
+          <td class="muted">Days&ndash;weeks</td>
+        </tr>
+        <tr>
+          <td>Expert-optimised, multi-tile GEMM</td>
+          <td class="highlight">80&ndash;98%</td>
+          <td class="muted">Weeks&ndash;months</td>
+        </tr>
+        <tr>
+          <td>Full array, end-to-end with overhead</td>
+          <td class="highlight">60&ndash;87%</td>
+          <td class="muted">Months (GAMA/ARIES level)</td>
+        </tr>
+      </table>
+
+    </div>
+  </div>
+
+  <!-- Section 3: Root Causes -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num">3</div>
+      <div class="section-title">
+        <h2>Why 0.6% Happens: Root Causes from Literature</h2>
+        <p>DMA stalls, missing vectorisation, and compute-communication overlap</p>
+      </div>
+    </div>
+    <div class="section-body">
+
+      <div class="details">
+        <p>Five factors identified in the academic literature explain the gap between our 0.6% and the 76&ndash;98% achieved by expert kernels:</p>
+      </div>
+
+      <table>
+        <tr>
+          <th>#</th>
+          <th>Factor</th>
+          <th>Impact</th>
+          <th>Source</th>
+        </tr>
+        <tr>
+          <td>1</td>
+          <td><strong>No DMA-compute overlap</strong></td>
+          <td class="dead">28% loss from this alone</td>
+          <td>Striking the Balance</td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td><strong>Missing vectorisation</strong></td>
+          <td class="dead">~10% mean for auto-generated code</td>
+          <td>NPUEval</td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td><strong>No double-buffering / ping-pong DMA</strong></td>
+          <td class="dead">AIE stalls completely during data movement</td>
+          <td>GAMA, AIE4ML</td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td><strong>Sub-optimal tile sizes for 64 KB SRAM</strong></td>
+          <td class="same">Wasted MACs on padding</td>
+          <td>DPUV4E</td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td><strong>int8&times;int32 accumulation (our pipeline)</strong></td>
+          <td class="same">50.6% peak vs 76.1% for int8&times;int8</td>
+          <td>Striking the Balance</td>
+        </tr>
+      </table>
+
+      <div class="details" style="margin-top:0.75rem;">
+        <p>The <strong>single biggest gain</strong> comes from DMA pre-fetch / double-buffering: overlap the next tile&rsquo;s DMA transfer with the current tile&rsquo;s compute. Without this, compute duty cycle drops to <code>compute_time / (compute_time + dma_time)</code>, which can be &lt;1% for bandwidth-limited transfers.</p>
+        <p>The GAMA paper quantifies compute-to-communication ratio (&gamma;) ranging from 0.72 to 0.96. For int8&times;int32 (our pipeline), &gamma; = 0.72 &mdash; meaning 28% of time is spent waiting for data even in the <em>optimised</em> case. Custom buffer placement recovers 12% of lost performance from memory stalls.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Section 4: NPU vs GPU for LLM — Industry-Wide -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num">4</div>
+      <div class="section-title">
+        <h2>NPU vs GPU for LLM Inference: Industry-Wide Comparison</h2>
+        <p>The structural mismatch is not AMD-specific</p>
+      </div>
+    </div>
+    <div class="section-body">
+
+      <div class="dead-box">
+        <div class="label">Universal finding</div>
+        <p>No vendor&rsquo;s NPU beats its companion GPU for LLM token generation. This is a <strong>structural architectural mismatch</strong>, not a software maturity issue.</p>
+      </div>
+
+      <div class="subphase-label">Cross-Vendor Decode Performance</div>
+      <table>
+        <tr>
+          <th>Vendor</th>
+          <th>NPU</th>
+          <th>NPU decode</th>
+          <th>GPU decode</th>
+          <th>Source</th>
+        </tr>
+        <tr>
+          <td><strong>AMD</strong> (this project)</td>
+          <td>XDNA2 (50 TOPS)</td>
+          <td class="dead">~0.7 t/s</td>
+          <td class="highlight">44 t/s (Vulkan)</td>
+          <td>Phase 11</td>
+        </tr>
+        <tr>
+          <td><strong>AMD</strong> (FastFlowLM)</td>
+          <td>XDNA2</td>
+          <td class="dead">10.94 t/s</td>
+          <td class="highlight">44.58 t/s</td>
+          <td>7shi / Zenn.dev</td>
+        </tr>
+        <tr>
+          <td><strong>Intel</strong></td>
+          <td>NPU 4 (48 TOPS)</td>
+          <td class="dead">~2.9 t/s (Llama3-8B)</td>
+          <td>~5.3 t/s</td>
+          <td>NITRO (arXiv:2412.11053)</td>
+        </tr>
+        <tr>
+          <td><strong>Qualcomm</strong></td>
+          <td>Hexagon (45 TOPS)</td>
+          <td class="same">~18&ndash;20 t/s</td>
+          <td class="same">comparable</td>
+          <td>ASPLOS&rsquo;25</td>
+        </tr>
+        <tr>
+          <td><strong>Apple</strong></td>
+          <td>ANE (38 TOPS)</td>
+          <td class="dead">CPU beats ANE</td>
+          <td class="highlight">30&ndash;40 t/s (Metal)</td>
+          <td>Orion (arXiv:2603.06728)</td>
+        </tr>
+        <tr>
+          <td><strong>Hailo</strong></td>
+          <td>Hailo-10H</td>
+          <td class="dead">6.9 t/s</td>
+          <td class="highlight">131.7 t/s (RTX 4050)</td>
+          <td>arXiv:2603.23640</td>
+        </tr>
+      </table>
+
+      <div class="subphase-label">Why TOPS &ne; LLM Performance</div>
+      <div class="details">
+        <p>Autoregressive LLM decode has fundamentally different characteristics from the workloads NPUs were designed for:</p>
+      </div>
+      <table>
+        <tr>
+          <th>LLM decode characteristic</th>
+          <th>NPU design assumption</th>
+        </tr>
+        <tr>
+          <td>Single token at a time (batch=1)</td>
+          <td class="dead">High batch parallelism</td>
+        </tr>
+        <tr>
+          <td>Variable sequence length</td>
+          <td class="dead">Fixed static shapes</td>
+        </tr>
+        <tr>
+          <td>Memory-bandwidth-bound</td>
+          <td class="dead">Compute-bound</td>
+        </tr>
+        <tr>
+          <td>Requires FP16/BF16 for LayerNorm, softmax</td>
+          <td class="dead">Optimised for INT8/INT4</td>
+        </tr>
+        <tr>
+          <td>Dynamic KV cache growing per token</td>
+          <td class="dead">Static tensor shapes</td>
+        </tr>
+      </table>
+      <div class="details" style="margin-top:0.75rem;">
+        <p><strong>The memory bandwidth wall:</strong> During decode, the entire model weights must be read from DRAM for every single token. A 7B INT4 model is ~3.5 GB. At LPDDR5X-8533 bandwidth (~68 GB/s), the theoretical maximum is ~19 tok/s regardless of NPU compute capacity. The NPU shares DRAM bandwidth with the CPU and iGPU &mdash; it has no dedicated memory channel.</p>
+      </div>
+
+      <div class="subphase-label">Vendor-Specific Findings</div>
+
+      <div class="warning-box">
+        <div class="label">Intel (NITRO, arXiv:2412.11053)</div>
+        <p>INT8 and INT4 symmetric quantisation compilation <strong>failed entirely</strong> on Intel NPU. GPU consistently 1.8&ndash;2.3&times; faster across all configurations. Intel&rsquo;s own docs acknowledge decode is &ldquo;mostly limited by DRAM bandwidth rather than compute capability.&rdquo;</p>
+      </div>
+
+      <div class="warning-box">
+        <div class="label">Qualcomm (ASPLOS&rsquo;25, arXiv:2407.05858)</div>
+        <p>FP16 matmul on NPU is <strong>159&times; slower</strong> than CPU INT8. Per-group quantisation (needed for activation outliers) incurs <strong>10.7&times; overhead</strong>. Graph compilation takes <strong>11+ seconds</strong> per prompt for variable-length inputs. NPU compiler lacks native RoPE, flash attention, dynamic KV caching.</p>
+      </div>
+
+      <div class="warning-box">
+        <div class="label">Apple (Orion, arXiv:2603.06728)</div>
+        <p>ANE has <strong>2.3 ms IOSurface round-trip overhead per dispatch</strong>. CPU baseline (283 tok/s on GPT-2 124M) <strong>outperforms</strong> ANE decode (170 tok/s). llama.cpp and MLX both ignore the ANE entirely and run on GPU through Metal.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Section 5: Developer Ecosystem -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num">5</div>
+      <div class="section-title">
+        <h2>Developer Ecosystem &amp; Community Reports</h2>
+        <p>What independent developers have experienced with XDNA NPUs</p>
+      </div>
+    </div>
+    <div class="section-body">
+
+      <div class="dead-box">
+        <div class="label">Community sentiment</div>
+        <p>Across Reddit (r/LocalLLaMA, r/AMD), Phoronix, Hacker News, and developer blogs, the overwhelming sentiment is: <strong>&ldquo;Great hardware, nonexistent software stack.&rdquo;</strong></p>
+      </div>
+
+      <div class="details">
+        <p>Key observations from community reports:</p>
+      </div>
+      <table>
+        <tr>
+          <th>Source</th>
+          <th>Finding</th>
+        </tr>
+        <tr>
+          <td>r/LocalLLaMA</td>
+          <td>NPU limited to INT8 ONNX models through AMD&rsquo;s pipeline. No general-purpose compute API. Multiple users report NPU sitting completely idle.</td>
+        </tr>
+        <tr>
+          <td>Phoronix</td>
+          <td>Kernel driver landed (Linux 6.11+) but userspace tooling essentially nonexistent. XRT described as &ldquo;designed for FPGAs first, NPUs second.&rdquo;</td>
+        </tr>
+        <tr>
+          <td>Framework Community</td>
+          <td>Hardware detection works but no practical inference path on Linux. Windows-only for LLM acceleration.</td>
+        </tr>
+        <tr>
+          <td>GitHub xdna-driver</td>
+          <td>Active issues about driver/toolchain version mismatches. Linux driver &ldquo;lags about a year&rdquo; behind AMD&rsquo;s internal implementation.</td>
+        </tr>
+        <tr>
+          <td>AMD&rsquo;s own forums</td>
+          <td>Support threads about Ryzen AI SDK installation failures. Setup process described as &ldquo;fragile.&rdquo;</td>
+        </tr>
+      </table>
+
+      <div class="details" style="margin-top:0.75rem;">
+        <p><strong>No upstream llama.cpp NPU backend exists</strong> for any vendor. A <code>ggml-hsa</code> branch for AMD was discussed in llama.cpp issue #14377 but auto-closed for inactivity. AMD has not contributed an NPU backend. The official AMD path is Windows-only ONNX Runtime GenAI.</p>
+        <p><strong>This project&rsquo;s approach</strong> &mdash; direct XRT dispatch with custom xclbin kernels on Linux &mdash; is essentially what no one outside AMD has successfully done for a production workload.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Section 6: Path Forward -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num">6</div>
+      <div class="section-title">
+        <h2>Path Forward: What Would Close the Gap</h2>
+        <p>Kernel optimisation priorities from the literature</p>
+      </div>
+    </div>
+    <div class="section-body">
+
+      <div class="good-box">
+        <div class="label">Prioritised kernel improvements</div>
+        <ul>
+          <li><strong>DMA double-buffering (ping-pong):</strong> Overlap next tile&rsquo;s DMA with current tile&rsquo;s compute. Biggest single gain &mdash; 28% recovery from this alone (Striking the Balance). Requires restructuring the ObjectFIFO pipeline in mlir-aie.</li>
+          <li><strong>Vectorised int8 MAC:</strong> Fully utilise the 16-wide int8 SIMD lanes on AIE2P. Current <code>whole_array</code> kernel may run scalar or under-vectorised. NPUEval shows ~10% mean vectorisation for auto-generated code.</li>
+          <li><strong>Larger per-core tiles:</strong> Current micro-tiles are 64&times;64&times;64. The 64 KB local SRAM per core can fit larger tiles, reducing DMA overhead relative to compute. GAMA uses carefully tuned tile sizes for 98&ndash;100% memory utilisation.</li>
+          <li><strong>Block FP16:</strong> XDNA2-specific format sharing one exponent across a block of values. AMD claims INT8-equivalent TOPS at FP16-class accuracy. Would improve quantisation quality without throughput loss.</li>
+          <li><strong>Dedicated LLaMA kernel:</strong> The <code>whole_array</code> example is general-purpose. A kernel optimised for specific (M, K, N) shapes from LLaMA layers could achieve significantly higher utilisation.</li>
+          <li><strong>AMD Ryzen AI SDK kernels:</strong> FastFlowLM achieves 66 tok/s on Llama 3.2 1B &mdash; orders of magnitude better than our kernel. AMD&rsquo;s proprietary kernels are not compatible with the open XRT dispatch model used here, but their existence proves the silicon is capable.</li>
+        </ul>
+      </div>
+
+      <div class="info-box">
+        <div class="label">Realistic targets</div>
+        <p>With DMA double-buffering and vectorisation (days&ndash;weeks of mlir-aie kernel work), the literature suggests <strong>50&ndash;80% utilisation is achievable</strong> &mdash; translating to 12.5&ndash;20 TOPS for our int8&times;int32 pipeline. This would make NPU prefill competitive with Vulkan for small context. However, NPU decode would remain bandwidth-bound and uncompetitive.</p>
+      </div>
+
+      <div class="warning-box">
+        <div class="label">Structural limitation</div>
+        <p>Even with perfect kernel utilisation, NPU LLM decode cannot beat GPU decode. The 4 MB on-chip SRAM cannot hold model weights; every dispatch requires DRAM reads through shared LPDDR5 bandwidth. The NPU has no dedicated memory channel. This is a hardware constraint, not a software one.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Section 7: XDNA2 Architecture Reference -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num">7</div>
+      <div class="section-title">
+        <h2>XDNA2 Architecture Reference</h2>
+        <p>Hardware specifications from technical deep-dives</p>
+      </div>
+    </div>
+    <div class="section-body">
+
+      <div class="subphase-label">Generation Comparison</div>
+      <table>
+        <tr>
+          <th>Feature</th>
+          <th>XDNA (Phoenix)</th>
+          <th>XDNA2 (Strix Point/Halo)</th>
+        </tr>
+        <tr>
+          <td>Array topology</td>
+          <td>4&times;5 (20 tiles)</td>
+          <td>4&times;8 (32 tiles)</td>
+        </tr>
+        <tr>
+          <td>MACs/tile/cycle (int8)</td>
+          <td>128</td>
+          <td class="highlight">256 (2&times;)</td>
+        </tr>
+        <tr>
+          <td>Peak INT8 TOPS</td>
+          <td>10&ndash;16</td>
+          <td class="highlight">50&ndash;55</td>
+        </tr>
+        <tr>
+          <td>L2 SRAM</td>
+          <td>2560 KB</td>
+          <td>4096 KB</td>
+        </tr>
+        <tr>
+          <td>Tile local SRAM</td>
+          <td>64 KB</td>
+          <td>64 KB (unchanged)</td>
+        </tr>
+        <tr>
+          <td>Cascade bus</td>
+          <td>384-bit</td>
+          <td>512-bit</td>
+        </tr>
+        <tr>
+          <td>Concurrent contexts</td>
+          <td>6</td>
+          <td>16</td>
+        </tr>
+        <tr>
+          <td>BF16 / Block FP16</td>
+          <td>BF16 only</td>
+          <td>BF16 + Block FP16</td>
+        </tr>
+      </table>
+
+      <div class="subphase-label">Memory Hierarchy</div>
+      <div class="details">
+        <p><strong>Per compute tile:</strong> 64 KB SRAM (4 banks &times; 16 KB). No caches &mdash; fixed-latency, software-managed. Dedicated DMA engines independent of compute.</p>
+        <p><strong>Per memory tile (1 per column):</strong> 512 KB scratchpad, serves as L2 for 4 compute tiles in its column.</p>
+        <p><strong>On-chip aggregate:</strong> ~800 GB/s SRAM bandwidth. 512-bit cascade bus at 80 GB/s.</p>
+        <p><strong>Off-chip:</strong> Shared LPDDR5/5X with CPU and iGPU. No dedicated NPU memory channel. LPDDR5X-7500: ~120 GB/s shared.</p>
+      </div>
+
+      <div class="subphase-label">Programming Model</div>
+      <div class="details">
+        <p><strong>Explicit data movement:</strong> The programmer must describe ALL data movement via circuit- or packet-switched routes. No automatic prefetching.</p>
+        <p><strong>No caches, no stalling:</strong> The compiler must schedule all instructions to avoid hazards. Powerful for deterministic throughput but brutal for programmability.</p>
+        <p><strong>Vectorisation is hard:</strong> NPUEval shows even GPT-4.1 achieves only 71.6% functional pass rate on AIE kernel compilation after 5 iterative attempts (29.4% on first try).</p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Section 8: Bibliography -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num">8</div>
+      <div class="section-title">
+        <h2>Bibliography</h2>
+        <p>Papers, benchmarks, and community sources</p>
+      </div>
+    </div>
+    <div class="section-body">
+
+      <div class="subphase-label">Academic Papers</div>
+      <ul class="ref-list">
+        <li><strong>[1]</strong> Ramezani et al., &ldquo;Striking the Balance: GEMM Performance Optimization Across Generations of Ryzen AI NPUs,&rdquo; <a href="https://arxiv.org/abs/2512.13282">arXiv:2512.13282</a>, Dec 2025. <em>XDNA/XDNA2 GEMM benchmarks, 38 TOPS achieved on Strix Point.</em></li>
+        <li><strong>[2]</strong> &ldquo;GAMA: High-Performance GEMM on AMD AIE-ML,&rdquo; <a href="https://arxiv.org/abs/2504.09688">arXiv:2504.09688</a>, FPL 2025. <em>85% peak utilisation, 165 TOPS INT8 on Versal VEK280.</em></li>
+        <li><strong>[3]</strong> &ldquo;AIE4ML: End-to-End NN Inference Framework for AIE,&rdquo; <a href="https://arxiv.org/abs/2512.15946">arXiv:2512.15946</a>, Dec 2025. <em>95.8% single-kernel efficiency, 82.2% end-to-end.</em></li>
+        <li><strong>[4]</strong> &ldquo;ARIES: MLIR-Based Compilation for AIE,&rdquo; FPGA 2025 (Cornell). <em>45.94 TOPS INT8, ~87% efficiency on VCK190.</em></li>
+        <li><strong>[5]</strong> &ldquo;MLIR-AIR: Spatial AI Compiler,&rdquo; <a href="https://arxiv.org/abs/2510.14871">arXiv:2510.14871</a>. <em>48.6&ndash;78.7% of peak across data types.</em></li>
+        <li><strong>[6]</strong> &ldquo;NPUEval: LLM-Generated NPU Kernels,&rdquo; <a href="https://arxiv.org/abs/2507.14403">arXiv:2507.14403</a>. <em>~10% mean vectorisation for auto-generated AIE code.</em></li>
+        <li><strong>[7]</strong> &ldquo;Unlocking the AMD NPU for ML Training,&rdquo; <a href="https://arxiv.org/abs/2504.03083">arXiv:2504.03083</a>, Apr 2025. <em>Bare-metal IRON programming, 3.1&times; CPU speedup on Phoenix.</em></li>
+        <li><strong>[8]</strong> &ldquo;DPUV4E: CNN on Versal ACAP,&rdquo; <a href="https://arxiv.org/abs/2506.11441">arXiv:2506.11441</a>. <em>&lt;5% utilisation for small BERT MM layers.</em></li>
+        <li><strong>[9]</strong> &ldquo;Efficient GEMM on AMD Versal vs Intel Stratix,&rdquo; <a href="https://arxiv.org/abs/2404.11066">arXiv:2404.11066</a>, FCCM 2024. <em>58.9% utilisation, DDR bandwidth as primary bottleneck.</em></li>
+        <li><strong>[10]</strong> &ldquo;NITRO: LLM Inference on Intel Laptop NPUs,&rdquo; <a href="https://arxiv.org/abs/2412.11053">arXiv:2412.11053</a>, Dec 2024. <em>GPU 1.8&ndash;2.3&times; faster than Intel NPU for LLM.</em></li>
+        <li><strong>[11]</strong> &ldquo;Fast On-device LLM Inference with NPUs,&rdquo; <a href="https://arxiv.org/abs/2407.05858">arXiv:2407.05858</a>, ASPLOS&rsquo;25. <em>Qualcomm NPU: FP16 matmul 159&times; slower than CPU INT8.</em></li>
+        <li><strong>[12]</strong> &ldquo;LLM Inference at the Edge: NPU and GPU Trade-offs,&rdquo; <a href="https://arxiv.org/abs/2603.23640">arXiv:2603.23640</a>, Mar 2026. <em>Hailo NPU 19&times; slower than RTX 4050, comparable J/token.</em></li>
+        <li><strong>[13]</strong> &ldquo;Orion: Programming Apple&rsquo;s Neural Engine for LLM,&rdquo; <a href="https://arxiv.org/abs/2603.06728">arXiv:2603.06728</a>, Mar 2026. <em>CPU outperforms ANE for decode; 2.3 ms dispatch overhead.</em></li>
+      </ul>
+
+      <div class="subphase-label">Independent Benchmarks &amp; Community</div>
+      <ul class="ref-list">
+        <li><strong>[14]</strong> 7shi, &ldquo;LLM Inference Speed on Ryzen AI Max+ 395,&rdquo; <a href="https://zenn.dev/7shi/articles/20251017-amd-llm">Zenn.dev</a>, Oct 2025. <em>NPU slowest of GPU/CPU/NPU.</em></li>
+        <li><strong>[15]</strong> lhl, &ldquo;Strix Halo LLM Benchmarks,&rdquo; <a href="https://forum.level1techs.com/t/strix-halo-ryzen-ai-max-395-llm-benchmark-results/233796">Level1Techs</a>, Jul&ndash;Dec 2025. <em>GPU-only results (NPU not functional enough to test).</em></li>
+        <li><strong>[16]</strong> Lockal, &ldquo;AMDXDNA,&rdquo; <a href="https://wiki.gentoo.org/wiki/User:Lockal/AMDXDNA">Gentoo Wiki</a>. <em>xrt-smi validate: 51.0 TOPS synthetic, 74 &micro;s latency.</em></li>
+        <li><strong>[17]</strong> Hardware Corner, &ldquo;AMD Targets Faster Local LLMs,&rdquo; <a href="https://www.hardware-corner.net/amd-targets-faster-local-llms/">hardware-corner.net</a>, 2025. <em>Hybrid NPU+iGPU, 2K&ndash;3K context cap.</em></li>
+        <li><strong>[18]</strong> <a href="https://fastflowlm.com/">FastFlowLM</a>. <em>AMD-backed NPU LLM inference: 66 tok/s on 1B, &lt;2W.</em></li>
+        <li><strong>[19]</strong> Framework Community, <a href="https://community.frame.work/t/status-of-amd-npu-support/65191">NPU support thread</a>. <em>Linux: driver loads, no practical inference path.</em></li>
+        <li><strong>[20]</strong> AMD, <a href="https://ryzenai.docs.amd.com/en/1.4/llm/overview.html">Ryzen AI Software 1.4 LLM Overview</a>. <em>Hybrid execution, supported models, Windows-only.</em></li>
+        <li><strong>[21]</strong> AMD, <a href="https://www.amd.com/content/dam/amd/en/documents/products/processors/ryzen/ai/iron-for-ryzen-ai-tutorial-isca-2025.pdf">IRON for Ryzen AI Tutorial (ISCA 2025)</a>. <em>Bare-metal AIE programming guide.</em></li>
+      </ul>
+
+    </div>
+  </div>
+
+  <!-- Nav footer -->
+  <p style="font-size:0.84rem; color: var(--muted); margin-bottom: 1rem;">
+    &larr; <a href="index.html" style="color: var(--blue); text-decoration: none;">All phases</a>
+    &nbsp;&middot;&nbsp;
+    <a href="phase11.html" style="color: var(--blue); text-decoration: none;">Phase 11 &mdash; Dispatch Reduction Investigation</a>
+  </p>
+
+  <footer>
+    Built with <a href="https://claude.ai/code">Claude Code</a> (claude-opus-4-6) &middot;
+    Hardware: Ryzen AI MAX 385 (RyzenAI-npu5, XDNA2) &middot;
+    <a href="https://github.com/BrandedTamarasu-glitch/OllamaAMDNPU">GitHub repo</a>
+  </footer>
+
+</div>
+</body>
+</html>
