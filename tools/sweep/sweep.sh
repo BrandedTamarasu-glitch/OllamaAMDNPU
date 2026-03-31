@@ -161,6 +161,7 @@ for OPT  in "${OPT_VALUES[@]}";  do
     echo "  Benchmarking (decode t/s)..."
     BENCH_LOG=$(mktemp)
     set +e
+    GGML_VK_VISIBLE_DEVICES="" \
     GGML_XDNA_XCLBIN_PATH="$XCLBIN" \
     GGML_XDNA_INSTR_PATH="$INSTS" \
     GGML_XDNA_TILE_M="$M_OUTER" \
