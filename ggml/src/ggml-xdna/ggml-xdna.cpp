@@ -40,6 +40,12 @@
  *   GGML_XDNA_MAX_N         — maximum N to offload (default 131072, i.e. no cap)
  *                             Set to 1 with MIN_N=1 to restrict NPU to decode only,
  *                             letting Vulkan handle large-batch prefill ops.
+ *   GGML_XDNA_TRACE         — enable AIE trace capture (0/1/true/false, default: disabled)
+ *   GGML_XDNA_TRACE_SIZE    — trace buffer size in bytes (4096–1048576, default: 8192)
+ *                             Must match the trace BD config baked into the xclbin.
+ *                             Mismatch produces corrupt / truncated trace output.
+ *   GGML_XDNA_TRACE_DIR     — directory for trace output files (default: ./trace-output/)
+ *   GGML_XDNA_TRACE_MAX_FILES — max trace files kept; oldest deleted on overflow (default: 100)
  *
  * Optional extra xclbin slots (e.g. different K dimensions or tile_n for decode):
  *   GGML_XDNA_XCLBIN_PATH_2..8 — path to xclbin        (all three required per slot)
@@ -79,13 +85,23 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <dirent.h>     // opendir, readdir
 #include <fstream>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <strings.h>    // strcasecmp (POSIX, not in <cstring>)
+#include <sys/stat.h>   // stat, mkdir
+#include <unistd.h>     // access, W_OK
 #include <unordered_map>
 #include <vector>
+
+// Trace buffer size constants (GGML_XDNA_TRACE_SIZE validation bounds)
+#define XDNA_TRACE_BUF_SIZE_DEFAULT  8192
+#define XDNA_TRACE_BUF_SIZE_MIN      4096
+#define XDNA_TRACE_BUF_SIZE_MAX      1048576
+#define XDNA_TRACE_MAX_FILES_DEFAULT 100
 
 // ---------------------------------------------------------------------------
 // Context
@@ -108,6 +124,18 @@ static int64_t xdna_env_int(const char * name, int64_t def, int64_t max_val) {
     return val;
 }
 
+// Returns true for "1"/"true" (case-insensitive), false for "0"/"false"/unset.
+// Warns on unrecognized values and returns the default.
+static bool xdna_env_bool(const char * name, bool def) {
+    const char * v = std::getenv(name);
+    if (!v) { return def; }
+    if (strcmp(v, "1") == 0 || strcasecmp(v, "true") == 0) { return true; }
+    if (strcmp(v, "0") == 0 || strcasecmp(v, "false") == 0) { return false; }
+    GGML_LOG_WARN("ggml_xdna: %s='%s' unrecognized (use 0/1/true/false), "
+                  "using default %s\n", name, v, def ? "true" : "false");
+    return def;
+}
+
 struct ggml_backend_xdna_context {
     xrt::device device;
 
@@ -126,6 +154,7 @@ struct ggml_backend_xdna_context {
         int64_t tile_k = 0;   // 0 = slot disabled
         int64_t tile_n = 32;
         bool    ready  = false;
+        int64_t trace_buf_size = 4;  // bytes; enlarged when GGML_XDNA_TRACE=1
 
     };
     XclbinSlot slots[MAX_SLOTS];
@@ -175,6 +204,11 @@ struct ggml_backend_xdna_context {
     std::vector<int8_t>  tile_a;
     std::vector<int8_t>  tile_b;
     std::vector<int32_t> tile_c;
+
+    // AIE trace capture (GGML_XDNA_TRACE*)
+    bool        trace_enabled   = false;
+    std::string trace_dir;
+    int64_t     trace_max_files = XDNA_TRACE_MAX_FILES_DEFAULT;
 
     // Serialises concurrent mul_mat calls across all ggml_backend_t handles that
     // share this singleton context. The NPU dispatches one kernel at a time anyway;
@@ -296,6 +330,49 @@ static bool dispatch_tile(ggml_backend_xdna_context * ctx,
     bo_c.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
     // kernel always fully overwrites bo_c (never accumulates); safe to read directly.
     std::memcpy(c_tile, bo_c.map<const int32_t *>(), (size_t)tm * tn * sizeof(int32_t));
+
+    if (ctx->trace_enabled) {
+        s.bo_trace.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+        const auto * trace_data = s.bo_trace.map<const uint8_t *>();
+
+        auto now = std::chrono::system_clock::now();
+        const auto time_t_val = std::chrono::system_clock::to_time_t(now);
+        char ts[64];
+        std::strftime(ts, sizeof(ts), "%Y-%m-%dT%H-%M-%S", std::localtime(&time_t_val));
+
+        char fname[512];
+        snprintf(fname, sizeof(fname), "%s/%s-slot%d.bin",
+                 ctx->trace_dir.c_str(), ts, slot_idx);
+
+        FILE * f = fopen(fname, "wb");
+        if (f) {
+            fwrite(trace_data, 1, (size_t)s.trace_buf_size, f);
+            fclose(f);
+        } else {
+            GGML_LOG_WARN("ggml_xdna: failed to write trace file '%s': %s\n",
+                          fname, strerror(errno));
+        }
+
+        // Enforce max-files cap — delete oldest (name sort = chronological for ISO timestamps)
+        DIR * dir = opendir(ctx->trace_dir.c_str());
+        if (dir) {
+            std::vector<std::string> files;
+            struct dirent * ent;
+            while ((ent = readdir(dir)) != nullptr) {
+                if (strstr(ent->d_name, ".bin") && strstr(ent->d_name, "-slot")) {
+                    files.push_back(ent->d_name);
+                }
+            }
+            closedir(dir);
+            if ((int64_t)files.size() > ctx->trace_max_files) {
+                std::sort(files.begin(), files.end());
+                const int64_t to_delete = (int64_t)files.size() - ctx->trace_max_files;
+                for (int64_t i = 0; i < to_delete; i++) {
+                    std::remove((ctx->trace_dir + "/" + files[i]).c_str());
+                }
+            }
+        }
+    }
 
     return true;
 }
@@ -728,13 +805,29 @@ static bool try_init_context(ggml_backend_xdna_context * ctx) {
                              xrt::bo::flags::host_only, kern.group_id(4));
         sl.bo_c   = xrt::bo(ctx->device, (size_t)sl.tile_m * sl.tile_n * sizeof(int32_t),
                              xrt::bo::flags::host_only, kern.group_id(5));
-        sl.bo_tmp   = xrt::bo(ctx->device, 4, xrt::bo::flags::host_only, kern.group_id(6));
-        sl.bo_trace = xrt::bo(ctx->device, 4, xrt::bo::flags::host_only, kern.group_id(7));
+        sl.bo_tmp = xrt::bo(ctx->device, 4, xrt::bo::flags::host_only, kern.group_id(6));
+
+        // bo_trace: 4 bytes (placeholder) when trace disabled; enlarged when enabled.
+        int64_t trace_sz = ctx->trace_enabled
+            ? xdna_env_int("GGML_XDNA_TRACE_SIZE", XDNA_TRACE_BUF_SIZE_DEFAULT, XDNA_TRACE_BUF_SIZE_MAX)
+            : 4;
+        if (ctx->trace_enabled && trace_sz < XDNA_TRACE_BUF_SIZE_MIN) {
+            GGML_LOG_WARN("ggml_xdna: GGML_XDNA_TRACE_SIZE=%lld below minimum %d, using %d\n",
+                          (long long)trace_sz, XDNA_TRACE_BUF_SIZE_MIN, XDNA_TRACE_BUF_SIZE_DEFAULT);
+            trace_sz = XDNA_TRACE_BUF_SIZE_DEFAULT;
+        }
+        sl.trace_buf_size = trace_sz;
+        sl.bo_trace = xrt::bo(ctx->device, (size_t)trace_sz, xrt::bo::flags::host_only, kern.group_id(7));
 
         // Pre-register output/scratch BOs with the DMA engine.
         sl.bo_c.sync(XCL_BO_SYNC_BO_TO_DEVICE);
         sl.bo_tmp.sync(XCL_BO_SYNC_BO_TO_DEVICE);
         sl.bo_trace.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+        if (ctx->trace_enabled) {
+            GGML_LOG_INFO("ggml_xdna: slot %d trace enabled, buffer=%lld bytes, dir=%s\n",
+                          slot_num, (long long)trace_sz, ctx->trace_dir.c_str());
+        }
 
         sl.ready = true;
         GGML_LOG_INFO("ggml_xdna: slot %d ready — tile %lld×%lld×%lld\n",
@@ -743,6 +836,28 @@ static bool try_init_context(ggml_backend_xdna_context * ctx) {
     };
 
     ctx->device = xrt::device(0);
+
+    // --- Global trace config (read once before any slot init) ---
+    ctx->trace_enabled = xdna_env_bool("GGML_XDNA_TRACE", false);
+    if (ctx->trace_enabled) {
+        const char * td = std::getenv("GGML_XDNA_TRACE_DIR");
+        ctx->trace_dir = td ? td : "./trace-output/";
+        ctx->trace_max_files = xdna_env_int("GGML_XDNA_TRACE_MAX_FILES",
+                                             XDNA_TRACE_MAX_FILES_DEFAULT, 10000);
+        // Validate/create trace directory at init rather than per-write
+        struct stat st;
+        if (stat(ctx->trace_dir.c_str(), &st) != 0) {
+            if (mkdir(ctx->trace_dir.c_str(), 0755) != 0) {
+                GGML_LOG_ERROR("ggml_xdna: cannot create trace dir '%s': %s — disabling trace\n",
+                               ctx->trace_dir.c_str(), strerror(errno));
+                ctx->trace_enabled = false;
+            }
+        } else if (access(ctx->trace_dir.c_str(), W_OK) != 0) {
+            GGML_LOG_ERROR("ggml_xdna: trace dir '%s' not writable — disabling trace\n",
+                           ctx->trace_dir.c_str());
+            ctx->trace_enabled = false;
+        }
+    }
 
     // --- Slot 0 (primary) ---
     init_slot(ctx->slots[0],
