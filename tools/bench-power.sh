@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # bench-power.sh — measure average SoC power (PPT) during llama-bench inference
-# Usage: bench-power.sh --npu|--vulkan|--phase7
+# Usage: bench-power.sh --npu|--vulkan|--phase7 [--json]
 #
 # NPU mode:     hides libggml-vulkan.so; uses GGML_BACKEND_PATH for XDNA.
 #               Measures NPU-only prefill+decode (p=PP_TOKENS, n=TG_TOKENS).
@@ -11,8 +11,11 @@
 #               Set GGML_XDNA_MIN_N=1 GGML_XDNA_MAX_N=1 before running.
 #
 # Uses llama-bench (stdout output) to avoid llama-cli tty-write issue.
-# Reads amdgpu PPT (hwmon3/power1_input, µW) at 200ms intervals and
+# Reads amdgpu PPT (hwmon3/power1_input, µW) at 50ms intervals and
 # reports: avg watts, t/s, and energy per decode token.
+#
+# Flags:
+#   --json   Emit structured JSON output in addition to human-readable summary.
 
 set -euo pipefail
 
@@ -43,8 +46,19 @@ fi
 
 MODE="${1:-}"
 if [[ "$MODE" != "--npu" && "$MODE" != "--vulkan" && "$MODE" != "--phase7" ]]; then
-    echo "Usage: bench-power.sh --npu|--vulkan|--phase7" >&2; exit 1
+    echo "Usage: bench-power.sh --npu|--vulkan|--phase7 [--json]" >&2; exit 1
 fi
+
+JSON_OUTPUT=0
+shift  # consume mode arg
+for arg in "$@"; do
+    case "$arg" in
+        --json) JSON_OUTPUT=1 ;;
+    esac
+done
+
+# When --json: route all human-readable output to stderr; JSON stays on stdout
+[[ $JSON_OUTPUT -eq 1 ]] && exec 3>&1 1>&2
 
 echo "=== bench-power: ${MODE/--/} mode ==="
 echo "Model: $MODEL  (pp=${PP_TOKENS} tg=${TG_TOKENS})"
@@ -70,12 +84,36 @@ elif [[ "$MODE" == "--vulkan" ]]; then
 fi
 # phase7: no hiding — both backends stay active
 
-# Start power sampler
-( while true; do cat "$POWER_FILE"; sleep 0.2; done ) > "$POWER_LOG" &
+# Start initial power sampler (will be killed after warmup)
+( while true; do cat "$POWER_FILE"; sleep 0.05; done ) > "$POWER_LOG" &
+SAMPLER_PID=$!
+
+# Warmup: run 5 seconds of inference to stabilize thermals
+echo "Warming up (5s)..."
+timeout 5 ./build/bin/llama-bench -m "$MODEL" -p 0 -n 5 -r 1 2>/dev/null || true
+
+# Kill warmup sampler, discard warmup power data, restart fresh
+kill "$SAMPLER_PID" 2>/dev/null; wait "$SAMPLER_PID" 2>/dev/null || true
+> "$POWER_LOG"
+
+# Idle baseline: measure 5 seconds of idle power (100 samples at 50ms = 5s)
+echo "Measuring idle baseline (5s)..."
+IDLE_LOG=$(mktemp)
+for i in $(seq 100); do
+    cat "$POWER_FILE" >> "$IDLE_LOG"
+    sleep 0.05
+done
+IDLE_W=$(awk '{s+=$1; n++} END {printf "%.2f", s/n/1000000}' "$IDLE_LOG")
+rm -f "$IDLE_LOG"
+echo "Idle baseline: ${IDLE_W}W"
+
+# Restart power sampler for actual measurement
+( while true; do cat "$POWER_FILE"; sleep 0.05; done ) > "$POWER_LOG" &
 SAMPLER_PID=$!
 
 # Run llama-bench — writes t/s to stdout (avoids llama-cli tty-write issue).
 # -r 1: single repetition (no multi-run averaging needed; power log handles stats).
+START_MS=$(date +%s%3N)
 if [[ "$MODE" == "--vulkan" ]]; then
     # Explicitly set GGML_BACKEND_PATH to Vulkan .so; -ngl 99 for full GPU offload.
     INFER_OUT=$(
@@ -97,6 +135,9 @@ else
             -m "$MODEL" -p "$PP_TOKENS" -n "$TG_TOKENS" -r 1 2>/dev/null
     )
 fi
+END_MS=$(date +%s%3N)
+DIFF_MS=$(( END_MS - START_MS ))
+DURATION=$(awk "BEGIN { printf \"%.1f\", $DIFF_MS / 1000 }")
 
 kill "$SAMPLER_PID" 2>/dev/null || true
 wait "$SAMPLER_PID" 2>/dev/null || true
@@ -125,16 +166,48 @@ else
     AVG_W="n/a"; MIN_W="n/a"; MAX_W="n/a"
 fi
 
-# Energy per decode token
+# Energy per decode token (total and marginal)
+ENERGY_JTOK="n/a"
+MARGINAL_W="n/a"
+MARGINAL_JTOK="n/a"
 if [[ "$GEN_TS" != "n/a" && "$AVG_W" != "n/a" ]]; then
-    J_PER_TOK=$(awk "BEGIN { printf \"%.4f\", $AVG_W / $GEN_TS }")
-else
-    J_PER_TOK="n/a"
+    ENERGY_JTOK=$(awk "BEGIN { printf \"%.4f\", $AVG_W / $GEN_TS }")
+    MARGINAL_W=$(awk "BEGIN { printf \"%.2f\", $AVG_W - $IDLE_W }")
+    MARGINAL_JTOK=$(awk "BEGIN { printf \"%.4f\", ($AVG_W - $IDLE_W) / $GEN_TS }")
 fi
 
-echo "Results ($N_SAMPLES power samples):"
+echo "Results ($N_SAMPLES power samples, ${DURATION}s):"
 printf "  Prefill:         %s t/s\n" "$PROMPT_TS"
 printf "  Decode:          %s t/s\n" "$GEN_TS"
+printf "  Idle baseline:   %s W\n" "$IDLE_W"
 printf "  Avg power (PPT): %s W  (min %s / max %s)\n" "$AVG_W" "$MIN_W" "$MAX_W"
-printf "  Energy/token:    %s J/tok\n" "$J_PER_TOK"
+printf "  Marginal power:  %s W\n" "$MARGINAL_W"
+printf "  Energy/token:    %s J/tok (total)  %s J/tok (marginal)\n" "$ENERGY_JTOK" "$MARGINAL_JTOK"
 echo ""
+
+# Restore stdout for JSON block
+[[ $JSON_OUTPUT -eq 1 ]] && exec 1>&3 3>&-
+
+if [[ $JSON_OUTPUT -eq 1 ]]; then
+    cat <<JSON_EOF
+{
+  "timestamp": "$(date -Iseconds)",
+  "backend": "$MODE",
+  "mode": "decode",
+  "model": "$MODEL",
+  "tile_config": "${GGML_XDNA_TILE_M:-?}x${GGML_XDNA_TILE_K:-?}x${GGML_XDNA_TILE_N:-?}",
+  "xclbin_hash": "$(sha256sum "${GGML_XDNA_XCLBIN_PATH:-/dev/null}" 2>/dev/null | head -c 12 || echo "n/a")",
+  "warmup_s": 5,
+  "measurement_s": $DURATION,
+  "sampling_ms": 50,
+  "idle_power_w": $IDLE_W,
+  "avg_power_w": $AVG_W,
+  "marginal_power_w": $MARGINAL_W,
+  "min_power_w": $MIN_W,
+  "max_power_w": $MAX_W,
+  "decode_ts": $GEN_TS,
+  "j_per_tok_total": $ENERGY_JTOK,
+  "j_per_tok_marginal": $MARGINAL_JTOK
+}
+JSON_EOF
+fi
