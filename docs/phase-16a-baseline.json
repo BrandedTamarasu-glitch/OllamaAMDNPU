@@ -1,0 +1,19 @@
+{
+  "timestamp": "2026-04-01T06:01:53-07:00",
+  "backend": "--phase7",
+  "mode": "decode",
+  "model": "/home/corye/models/Meta-Llama-3-8B-Instruct-Q8_0.gguf",
+  "tile_config": "128x2048x64",
+  "xclbin_hash": "32f81da27ba8",
+  "warmup_s": 5,
+  "measurement_s": 95.2,
+  "sampling_ms": 50,
+  "idle_power_w": 29.55,
+  "avg_power_w": 41.04,
+  "marginal_power_w": 11.49,
+  "min_power_w": 24.08,
+  "max_power_w": 63.04,
+  "decode_ts": 0.11,
+  "j_per_tok_total": 373.0909,
+  "j_per_tok_marginal": 104.4545
+}

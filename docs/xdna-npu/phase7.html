@@ -274,6 +274,54 @@
     </p>
   </div>
 
+  <!-- Addendum — Phase 14 (2026-03-31) -->
+  <div style="
+    background: var(--red-dim);
+    border: 1px solid var(--red);
+    border-left: 4px solid var(--red);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 2rem;
+  ">
+    <div style="
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--red);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.6rem;
+    ">&#9888; Addendum &mdash; Phase 14 (2026-03-31)</div>
+
+    <p style="font-size: 0.87rem; color: var(--text); margin-bottom: 0.65rem;">
+      Phase 14 measured NPU decode throughput directly with
+      <code>GGML_VK_VISIBLE_DEVICES=""</code> (Vulkan disabled) and
+      <code>GGML_XDNA_MIN_N=1</code> on Q8_0 Llama 3 8B.
+    </p>
+
+    <p style="font-size: 0.87rem; color: var(--muted); margin-bottom: 0.5rem;">
+      <strong style="color: var(--text);">Measured NPU decode (Q8_0, N=1, steady-state): 0.12 t/s</strong><br>
+      <strong style="color: var(--text);">CPU decode (Q8_0, N=1, no NPU): 6.18 t/s</strong><br>
+      NPU is <strong style="color: var(--red);">~51&times; slower</strong> than CPU for single-token decode on Q8_0.
+    </p>
+
+    <p style="font-size: 0.87rem; color: var(--muted); margin-bottom: 0.5rem;">
+      The tile_bos pre-staging cache (Phase 10) is functioning correctly &mdash; rep 1 and rep 2
+      of the same benchmark differ by &le;0.01 t/s (± noise). Per-dispatch latency is the wall,
+      not cache misses.
+    </p>
+
+    <p style="font-size: 0.87rem; color: var(--muted); margin-bottom: 0.65rem;">
+      Root cause: each decode token requires ~192+ NPU kernel dispatches (32 layers &times; ~6 GEMMs
+      &times; M/128 tiles). At ~1.2&ndash;1.4 ms per dispatch, the physics ceiling is ~1.2 t/s for
+      Q8_0 &mdash; well below the 6.2 t/s CPU baseline. No tile-size optimisation can close this gap.
+    </p>
+
+    <p style="font-size: 0.87rem; color: var(--text); margin-bottom: 0;">
+      <strong>Conclusion:</strong> NPU decode is non-viable for Q8_0 at any batch size N=1&ndash;64.
+      Phase 14B (mm_decode.cc kernel fork) retired. Focus redirected to NPU/Vulkan prefill optimisation.
+    </p>
+  </div>
+
   <!-- Phase 7 -->
   <div class="phase done">
     <div class="phase-header">
