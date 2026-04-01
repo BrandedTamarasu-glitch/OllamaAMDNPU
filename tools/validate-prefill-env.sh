@@ -97,10 +97,12 @@ check_slot "slot-7" "GGML_XDNA_XCLBIN_PATH_7"  "GGML_XDNA_INSTR_PATH_7"
 check_slot "slot-8" "GGML_XDNA_XCLBIN_PATH_8"  "GGML_XDNA_INSTR_PATH_8"
 echo ""
 
+TOTAL_CONFIGURED=$(( PASS + FAIL ))
+
 if [[ $FAIL -eq 0 ]]; then
-    echo "=== PASS: ${PASS}/8 slots valid ==="
+    echo "=== PASS: ${PASS}/${TOTAL_CONFIGURED} slots valid ==="
     exit 0
 else
-    echo "=== FAIL: ${FAIL} slot(s) invalid, ${PASS} OK ==="
+    echo "=== FAIL: ${FAIL}/${TOTAL_CONFIGURED} slot(s) invalid, ${PASS} OK ==="
     exit 1
 fi

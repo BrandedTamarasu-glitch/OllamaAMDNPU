@@ -1,24 +1,26 @@
 #!/usr/bin/env bash
-# build-prefill-xclbins.sh — Build tile_n=128 prefill xclbins for Phase 17B
+# build-prefill-xclbins.sh — Build NPU prefill xclbins (configurable tile_n)
 #
 # Usage: ./tools/build-prefill-xclbins.sh [OPTIONS]
 #
-# Builds 4 xclbins (K=2048/4096/5632/14336) with M=128, N=128 into a staging
-# directory, then atomically promotes to ~/xclbin-prefill/ if ≥2/4 succeed.
+# Builds 4 xclbins (K=2048/4096/5632/14336) with M=128 and a configurable N
+# into a staging directory, then atomically promotes to ~/xclbin-prefill/ if
+# ≥2/4 succeed.
 #
-# Inner tiles: m=32 k=128 n=32 (constrained by M=128/N=128 with 4 AIE rows/cols)
+# Inner tiles: m=TILE_M/4  k=128  n=TILE_N/4  (4 AIE rows/cols)
 # Required env: mlir-aie-env venv + PEANO_INSTALL_DIR
 #
 # Options:
 #   --output-dir DIR    Destination dir (default: ~/xclbin-prefill)
 #   --tile-m N          Override TILE_M (default: 128)
+#   --tile-n N          Override TILE_N (default: 128); INNER_N derived as N/4
 #   --k-values "A B C"  Space-separated K values (default: "2048 4096 5632 14336")
 #   --dry-run           Print commands without executing
 #   --skip-build        Skip make; only write manifest from existing staging files
 #
 # Outputs per K:
-#   ~/xclbin-prefill/k${K}_n128_prefill.xclbin
-#   ~/xclbin-prefill/k${K}_n128_prefill.txt
+#   ~/xclbin-prefill/k${K}_n${TILE_N}_prefill.xclbin
+#   ~/xclbin-prefill/k${K}_n${TILE_N}_prefill.txt
 #   ~/xclbin-prefill/manifest.json
 
 set -euo pipefail
@@ -45,6 +47,7 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --output-dir)   OUTPUT_DIR="$2";       shift 2 ;;
         --tile-m)       TILE_M="$2";           shift 2 ;;
+        --tile-n)       TILE_N="$2";           shift 2 ;;
         --k-values)     read -ra K_VALUES <<< "$2";
                         for _v in "${K_VALUES[@]}"; do
                             [[ "$_v" =~ ^[0-9]+$ ]] || { echo "ERROR: invalid --k-values entry: '$_v'"; exit 1; }
@@ -56,8 +59,13 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Validate --tile-m is numeric
+# Validate --tile-m and --tile-n are numeric
 [[ "$TILE_M" =~ ^[0-9]+$ ]] || { echo "ERROR: invalid --tile-m value: '$TILE_M'"; exit 1; }
+[[ "$TILE_N" =~ ^[0-9]+$ ]] || { echo "ERROR: invalid --tile-n value: '$TILE_N'"; exit 1; }
+
+# Derive inner tiles from TILE_M and TILE_N (4 AIE rows/cols)
+INNER_M=$(( TILE_M / N_AIE_COLS ))
+INNER_N=$(( TILE_N / N_AIE_COLS ))
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 run() {
@@ -222,34 +230,36 @@ MLIR_AIE_COMMIT=$(cd "$MLIR_AIE_DIR" && git rev-parse --short HEAD 2>/dev/null |
 BUILD_DATE=$(date -Iseconds)
 
 MANIFEST="$OUTPUT_DIR/manifest.json"
-{
-    echo "{"
-    echo "  \"build_date\": \"${BUILD_DATE}\","
-    echo "  \"mlir_aie_commit\": \"${MLIR_AIE_COMMIT}\","
-    echo "  \"tile_m\": ${TILE_M},"
-    echo "  \"tile_n\": ${TILE_N},"
-    echo "  \"inner_m\": ${INNER_M},"
-    echo "  \"inner_k\": ${INNER_K},"
-    echo "  \"inner_n\": ${INNER_N},"
-    echo "  \"n_aie_cols\": ${N_AIE_COLS},"
-    echo "  \"device\": \"npu2\","
-    echo "  \"k_values\": {"
-    FIRST=1
-    for K in "${K_VALUES[@]}"; do
-        [[ $FIRST -eq 0 ]] && echo ","
-        STATUS="${BUILD_STATUS[$K]:-unknown}"
-        XCLBIN_FILE="$OUTPUT_DIR/k${K}_n${TILE_N}_prefill.xclbin"
-        XCLBIN_SIZE=$(stat -c%s "$XCLBIN_FILE" 2>/dev/null || echo 0)
-        # Downgrade status to "missing" if the promoted file is absent/empty
-        [[ "$STATUS" == "ok" && ! -s "$XCLBIN_FILE" ]] && STATUS="missing"
-        printf "    \"k%s\": {\"status\": \"%s\", \"xclbin_bytes\": %s}" \
-            "$K" "$STATUS" "$XCLBIN_SIZE"
-        FIRST=0
-    done
-    echo ""
-    echo "  }"
-    echo "}"
-} > "$MANIFEST"
+
+# Build k_values dict entries for python
+PY_K_ENTRIES=""
+for K in "${K_VALUES[@]}"; do
+    STATUS="${BUILD_STATUS[$K]:-unknown}"
+    XCLBIN_FILE="$OUTPUT_DIR/k${K}_n${TILE_N}_prefill.xclbin"
+    XCLBIN_SIZE=$(stat -c%s "$XCLBIN_FILE" 2>/dev/null || echo 0)
+    [[ "$STATUS" == "ok" && ! -s "$XCLBIN_FILE" ]] && STATUS="missing"
+    PY_K_ENTRIES+="\"k${K}\": {\"status\": \"${STATUS}\", \"xclbin_bytes\": ${XCLBIN_SIZE}},"
+done
+# Remove trailing comma
+PY_K_ENTRIES="${PY_K_ENTRIES%,}"
+
+python3 - <<PYEOF > "$MANIFEST"
+import json, sys
+k_entries = {${PY_K_ENTRIES}}
+manifest = {
+    "build_date":       "${BUILD_DATE}",
+    "mlir_aie_commit":  "${MLIR_AIE_COMMIT}",
+    "tile_m":           ${TILE_M},
+    "tile_n":           ${TILE_N},
+    "inner_m":          ${INNER_M},
+    "inner_k":          ${INNER_K},
+    "inner_n":          ${INNER_N},
+    "n_aie_cols":       ${N_AIE_COLS},
+    "device":           "npu2",
+    "k_values":         k_entries,
+}
+print(json.dumps(manifest, indent=2))
+PYEOF
 
 echo ""
 echo "=== Done ==="
