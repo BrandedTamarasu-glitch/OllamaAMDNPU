@@ -9,12 +9,16 @@
 
 | Config | Backend | pp160 t/s |
 |---|---|---|
-| Phase 17 baseline — Vulkan alone | Vulkan | 16.41 |
+| Phase 16/17 baseline — CPU only | CPU | 17.12 ± 0.03 |
 | Phase 17 baseline — Vulkan+XDNA tile_n=64 | Vulkan+XDNA | 6.11 |
 | **Phase 17B — XDNA tile_n=128** | **XDNA** | **17.70 ± 1.98** |
 
-NPU-only prefill at tile_n=128 beats Vulkan alone by **+7.8%**.
+NPU-only prefill at tile_n=128 matches CPU prefill at pp=160 (**+3.4%** vs CPU, within std dev).
 
+> The earlier table entry "Vulkan alone: 16.41 t/s" was a mislabeled CPU-only measurement (confirmed
+> Phase 17C: real Vulkan prefill is ~790 t/s at pp=128). NPU is not competitive with Vulkan — the goal
+> is NPU viability as a CPU replacement when the iGPU is busy.
+>
 > ±1.98 is the std dev reported by llama-bench across 3 runs (CV ≈ 11.2% — high but expected at pp=160
 > due to NPU dispatch jitter at small token counts). Phase 17C sweep will use -r 5 for tighter estimates.
 
@@ -29,7 +33,7 @@ NPU-only prefill at tile_n=128 beats Vulkan alone by **+7.8%**.
 | 2–5 | Close — dispatch latency architectural |
 | < 2 | Close — fundamental floor confirmed |
 
-**Outcome: 17.70 t/s → Phase 17C full sweep authorized**
+**Outcome: 17.70 t/s ≈ CPU baseline (17.12 t/s) → NPU prefill viability confirmed → Phase 17C sweep authorized**
 
 ---
 
