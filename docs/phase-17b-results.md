@@ -15,6 +15,9 @@
 
 NPU-only prefill at tile_n=128 beats Vulkan alone by **+7.8%**.
 
+> ±1.98 is the std dev reported by llama-bench across 3 runs (CV ≈ 11.2% — high but expected at pp=160
+> due to NPU dispatch jitter at small token counts). Phase 17C sweep will use -r 5 for tighter estimates.
+
 ---
 
 ## Gate Decision
@@ -57,10 +60,14 @@ bash tools/build-prefill-xclbins.sh
 bash tools/validate-prefill-env.sh
 
 # 3. Measure (Vulkan hidden, prefill only)
+export GGML_VK_VISIBLE_DEVICES=""
 source ~/.npu-prefill.env
+# Restore SO on exit/interrupt — without this, subsequent runs would appear NPU-only when they aren't
+trap 'mv build/bin/libggml-vulkan.so.bench-hidden build/bin/libggml-vulkan.so 2>/dev/null; exit' ERR EXIT
 mv build/bin/libggml-vulkan.so build/bin/libggml-vulkan.so.bench-hidden
 ./build/bin/llama-bench -m ~/models/Meta-Llama-3-8B-Instruct-Q8_0.gguf -p 160 -n 0 -r 3
 mv build/bin/libggml-vulkan.so.bench-hidden build/bin/libggml-vulkan.so
+trap - ERR EXIT
 ```
 
 ---

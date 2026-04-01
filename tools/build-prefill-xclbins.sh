@@ -45,12 +45,19 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --output-dir)   OUTPUT_DIR="$2";       shift 2 ;;
         --tile-m)       TILE_M="$2";           shift 2 ;;
-        --k-values)     read -ra K_VALUES <<< "$2"; shift 2 ;;
+        --k-values)     read -ra K_VALUES <<< "$2";
+                        for _v in "${K_VALUES[@]}"; do
+                            [[ "$_v" =~ ^[0-9]+$ ]] || { echo "ERROR: invalid --k-values entry: '$_v'"; exit 1; }
+                        done
+                        shift 2 ;;
         --dry-run)      DRY_RUN=1;             shift ;;
         --skip-build)   SKIP_BUILD=1;          shift ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
+
+# Validate --tile-m is numeric
+[[ "$TILE_M" =~ ^[0-9]+$ ]] || { echo "ERROR: invalid --tile-m value: '$TILE_M'"; exit 1; }
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 run() {
@@ -189,7 +196,7 @@ if [[ $DRY_RUN -eq 1 ]]; then
 fi
 
 if [[ $SUCCEEDED -lt 2 ]]; then
-    echo "ERROR: Only ${SUCCEEDED}/4 builds succeeded — minimum 2 required for promotion."
+    echo "ERROR: Only ${SUCCEEDED}/${TOTAL} builds succeeded — minimum 2 required for promotion."
     echo "       Staging dir preserved at: ${STAGING_DIR}"
     echo "       Per-build logs:"
     for K in "${K_VALUES[@]}"; do
@@ -233,6 +240,8 @@ MANIFEST="$OUTPUT_DIR/manifest.json"
         STATUS="${BUILD_STATUS[$K]:-unknown}"
         XCLBIN_FILE="$OUTPUT_DIR/k${K}_n${TILE_N}_prefill.xclbin"
         XCLBIN_SIZE=$(stat -c%s "$XCLBIN_FILE" 2>/dev/null || echo 0)
+        # Downgrade status to "missing" if the promoted file is absent/empty
+        [[ "$STATUS" == "ok" && ! -s "$XCLBIN_FILE" ]] && STATUS="missing"
         printf "    \"k%s\": {\"status\": \"%s\", \"xclbin_bytes\": %s}" \
             "$K" "$STATUS" "$XCLBIN_SIZE"
         FIRST=0
